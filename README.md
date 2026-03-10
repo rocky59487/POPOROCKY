@@ -1,6 +1,6 @@
-# FastDesign v1.0 - 次世代 3D 敏捷設計系統
+# FastDesign v1.5 - 次世代 3D 體素設計系統
 
-FastDesign 是一個基於 Electron + React + Three.js 的桌面端 3D 設計應用程式，實現了體素建模、語意標籤、NURBS 曲面轉換等核心功能。系統採用星狀拓撲 Event Bus 架構，八大引擎完全解耦，支援延遲運算與即時協作。
+FastDesign 是一個基於 Electron + React + Three.js 的桌面端 3D 體素設計應用程式，具備真實有限元素分析（FEA）、NURBS 曲面轉換管線、AutoCAD 風格指令列、Glue 黏合系統等專業 CAD 功能。系統採用星狀拓撲 Event Bus 架構，七大引擎完全解耦，總計 8,700+ 行 TypeScript/TSX/CSS 原始碼。
 
 ## 系統架構
 
