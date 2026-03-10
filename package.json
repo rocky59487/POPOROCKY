@@ -6,7 +6,7 @@
     "build:main": "webpack --config webpack.main.config.js",
     "build:renderer": "webpack --config webpack.renderer.config.js",
     "build": "npm run build:main && npm run build:renderer",
-    "start": "npm run build && electron ."
+    "start": "npm run build && electron . --no-sandbox"
   },
   "keywords": ["3d", "cad", "voxel", "nurbs"],
   "author": "FastDesign Team",
@@ -16,10 +16,13 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "electron": "^40.8.0",
+    "immer": "^11.1.4",
+    "lucide-react": "^0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "three": "^0.183.2",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

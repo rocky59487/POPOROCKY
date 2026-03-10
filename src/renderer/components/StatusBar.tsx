@@ -1,53 +1,33 @@
-/**
- * StatusBar - 狀態列組件
- */
+import React from 'react';
+import { useStore } from '../store/useStore';
+import { Activity, Cpu, Triangle, Box, MousePointer2 } from 'lucide-react';
 
-import React, { useMemo } from 'react';
-import { useAppState } from '../store/AppStore';
+const tn: Record<string,string>={select:'選取',place:'放置',erase:'刪除',paint:'上色',brush:'體素刷',smooth:'平滑',fill:'填充',sculpt:'雕刻',measure:'測量','tag-sharp':'Sharp','tag-smooth':'Smooth','tag-fillet':'Fillet'};
 
-const TOOL_LABELS: Record<string, string> = {
-  select: '選取',
-  place: '放置體素',
-  delete: '刪除體素',
-  paint: '上色',
-  tag_sharp: '標記銳利',
-  tag_smooth: '標記平滑',
-  tag_fillet: '標記圓角',
-  measure: '測量',
-};
-
-const StatusBar: React.FC = () => {
-  const { state } = useAppState();
-
-  const activeEngines = useMemo(() => {
-    return Object.values(state.engineStatus).filter(Boolean).length;
-  }, [state.engineStatus]);
-
-  const totalVoxels = useMemo(() => {
-    return state.project.chunks.reduce((sum, c) => sum + c.active_voxels.length, 0);
-  }, [state.project.chunks]);
-
+export function StatusBar() {
+  const fps=useStore(s=>s.fps),mem=useStore(s=>s.memoryUsage),vc=useStore(s=>s.voxels.length),tris=useStore(s=>s.triangleCount);
+  const tool=useStore(s=>s.activeTool),pl=useStore(s=>s.pipeline),engines=useStore(s=>s.engines);
+  const rc=engines.filter(e=>e.running).length;
   return (
-    <div className="status-bar">
-      <div className="status-bar-left">
-        <div className="status-indicator">
-          <span className="status-dot green" />
-          <span>系統就緒</span>
-        </div>
-        <span>工具: {TOOL_LABELS[state.activeTool] || state.activeTool}</span>
-        <span>圖層: {state.project.layers.find(l => l.layer_id === state.activeLayerId)?.name || '-'}</span>
-        {state.semanticIntent !== 'default' && (
-          <span style={{ color: 'var(--warning)' }}>語意: {state.semanticIntent}</span>
-        )}
+    <div className="app-status-bar">
+      <div className="status-section">
+        <span className="status-item"><MousePointer2 size={10}/> {tn[tool]||tool}</span>
+        <span className="status-divider">|</span>
+        <span className="status-item"><Box size={10}/> 體素: {vc}</span>
+        <span className="status-divider">|</span>
+        <span className="status-item"><Triangle size={10}/> 三角面: {tris}</span>
+        <span className="status-divider">|</span>
+        <span className="status-item">引擎: {rc}/{engines.length}</span>
+        {pl.status==='running'&&<><span className="status-divider">|</span><span className="status-item" style={{color:'var(--accent)'}}>管線: {pl.progress.toFixed(0)}%</span></>}
+        {pl.status==='done'&&<><span className="status-divider">|</span><span className="status-item" style={{color:'var(--success)'}}>NURBS 已生成</span></>}
       </div>
-      <div className="status-bar-right">
-        <span>體素: {totalVoxels}</span>
-        <span>區塊: {state.project.chunks.length}</span>
-        <span>引擎: {activeEngines}/8</span>
-        <span>v{state.project.sync_version}</span>
+      <div className="status-section">
+        <span className="status-item" style={{color:fps>=50?'var(--success)':fps>=30?'var(--warning)':'var(--error)'}}><Activity size={10}/> {fps} FPS</span>
+        <span className="status-divider">|</span>
+        <span className="status-item"><Cpu size={10}/> {mem} MB</span>
+        <span className="status-divider">|</span>
+        <span className="status-item">FastDesign v1.0</span>
       </div>
     </div>
   );
-};
-
-export default StatusBar;
+}

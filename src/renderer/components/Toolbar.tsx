@@ -1,195 +1,70 @@
-/**
- * Toolbar - 工具列組件
- * 
- * 包含體素操作工具、語意標籤工具、視口設定等。
- */
+import React from 'react';
+import { useStore, ToolType, SelectMode } from '../store/useStore';
+import { MousePointer2, Plus, Eraser, Paintbrush, CircleDot, Waves, Droplets, Mountain, Ruler, Maximize2, Grid3x3 } from 'lucide-react';
 
-import React, { useCallback } from 'react';
-import { useAppState, ToolType } from '../store/AppStore';
-import { SemanticIntent } from '../store/DataModels';
-import signalBus, { SIGNALS } from '../engines/EventBus';
+const tools: {id:ToolType;icon:any;label:string;key:string}[] = [
+  {id:'select',icon:MousePointer2,label:'選取',key:'V'},{id:'place',icon:Plus,label:'放置',key:'B'},
+  {id:'erase',icon:Eraser,label:'刪除',key:'E'},{id:'paint',icon:Paintbrush,label:'上色',key:'P'},
+  {id:'brush',icon:CircleDot,label:'體素刷',key:'⇧B'},{id:'smooth',icon:Waves,label:'平滑',key:'⇧S'},
+  {id:'fill',icon:Droplets,label:'填充',key:'⇧F'},{id:'sculpt',icon:Mountain,label:'雕刻',key:'⇧C'},
+  {id:'measure',icon:Ruler,label:'測量',key:'M'},
+];
+const tags: {id:ToolType;label:string;color:string}[] = [
+  {id:'tag-sharp',label:'Sharp',color:'#ff4757'},{id:'tag-smooth',label:'Smooth',color:'#3dd68c'},{id:'tag-fillet',label:'Fillet',color:'#f5a623'},
+];
 
-interface ToolButtonProps {
-  icon: string;
-  label: string;
-  tool: ToolType;
-  activeTool: ToolType;
-  onClick: (tool: ToolType) => void;
-}
-
-const ToolButton: React.FC<ToolButtonProps> = ({ icon, label, tool, activeTool, onClick }) => (
-  <button
-    className={`toolbar-btn ${activeTool === tool ? 'active' : ''}`}
-    onClick={() => onClick(tool)}
-    title={label}
-  >
-    {icon}
-  </button>
-);
-
-const Toolbar: React.FC = () => {
-  const { state, dispatch } = useAppState();
-
-  const setTool = useCallback((tool: ToolType) => {
-    dispatch({ type: 'SET_TOOL', payload: tool });
-    signalBus.publish(SIGNALS.LOG_MESSAGE, {
-      level: 'info',
-      source: 'Toolbar',
-      message: `工具切換: ${tool}`,
-    });
-  }, [dispatch]);
-
-  const handleConvert = useCallback(() => {
-    signalBus.publish(SIGNALS.NURBS_CONVERSION_REQ, {
-      project: state.project,
-    });
-  }, [state.project]);
-
-  const handleExport = useCallback(() => {
-    signalBus.publish(SIGNALS.LOG_MESSAGE, {
-      level: 'info',
-      source: 'Export',
-      message: '正在準備 Rhino 匯出資料...',
-    });
-    // Trigger export
-    const payload = {
-      export_metadata: {
-        timestamp: new Date().toISOString(),
-        author: 'FastDesign User',
-        units: 'Millimeters',
-      },
-      rhino_layers: state.project.layers.map(l => ({
-        name: l.name,
-        color: l.color,
-        is_culled_by_physics: l.is_culled_by_physics,
-      })),
-      geometry_objects: [],
-    };
-    signalBus.publish(SIGNALS.LOG_MESSAGE, {
-      level: 'success',
-      source: 'Export',
-      message: `匯出完成: ${JSON.stringify(payload.export_metadata)}`,
-    });
-  }, [state.project]);
-
-  const toggleViewport = useCallback((key: string) => {
-    const current = (state.viewportSettings as any)[key];
-    dispatch({ type: 'SET_VIEWPORT_SETTING', payload: { key, value: !current } });
-  }, [state.viewportSettings, dispatch]);
+export function Toolbar() {
+  const activeTool=useStore(s=>s.activeTool), setTool=useStore(s=>s.setTool);
+  const viewMode=useStore(s=>s.viewMode), setViewMode=useStore(s=>s.setViewMode);
+  const viewLayout=useStore(s=>s.viewLayout), setViewLayout=useStore(s=>s.setViewLayout);
+  const selectMode=useStore(s=>s.selectMode), setSelectMode=useStore(s=>s.setSelectMode);
+  const brushSize=useStore(s=>s.brushSize), setBrushSize=useStore(s=>s.setBrushSize);
+  const paintColor=useStore(s=>s.paintColor), setPaintColor=useStore(s=>s.setPaintColor);
+  const pipeline=useStore(s=>s.pipeline), startPipeline=useStore(s=>s.startPipeline);
 
   return (
-    <div className="app-toolbar">
-      {/* 基本工具 */}
-      <span className="toolbar-label">工具</span>
-      <ToolButton icon="⊞" label="選取 (Select)" tool="select" activeTool={state.activeTool} onClick={setTool} />
-      <ToolButton icon="＋" label="放置體素 (Place)" tool="place" activeTool={state.activeTool} onClick={setTool} />
-      <ToolButton icon="✕" label="刪除體素 (Delete)" tool="delete" activeTool={state.activeTool} onClick={setTool} />
-      <ToolButton icon="◎" label="上色 (Paint)" tool="paint" activeTool={state.activeTool} onClick={setTool} />
-
-      <div className="toolbar-separator" />
-
-      {/* 語意標籤工具 */}
-      <span className="toolbar-label">語意標籤</span>
-      <ToolButton icon="◆" label="銳利標籤 (Sharp)" tool="tag_sharp" activeTool={state.activeTool} onClick={setTool} />
-      <ToolButton icon="◠" label="平滑曲線 (Smooth Curve)" tool="tag_smooth" activeTool={state.activeTool} onClick={setTool} />
-      <ToolButton icon="◯" label="圓角標籤 (Fillet R)" tool="tag_fillet" activeTool={state.activeTool} onClick={setTool} />
-
-      <div className="toolbar-separator" />
-
-      {/* 語意意圖選擇 */}
-      <span className="toolbar-label">放置意圖</span>
-      <select
-        value={state.semanticIntent}
-        onChange={(e) => dispatch({ type: 'SET_SEMANTIC_INTENT', payload: e.target.value as SemanticIntent })}
-        style={{
-          background: 'var(--bg-primary)',
-          color: 'var(--text-primary)',
-          border: '1px solid var(--border)',
-          borderRadius: '3px',
-          padding: '2px 6px',
-          fontSize: '11px',
-        }}
-      >
-        <option value="default">預設</option>
-        <option value="sharp">銳利 (Sharp)</option>
-        <option value="smooth_curve">平滑曲線</option>
-        <option value="fillet_R">圓角 (Fillet)</option>
-      </select>
-
-      {state.semanticIntent === 'fillet_R' && (
-        <input
-          type="number"
-          value={state.filletRadius}
-          onChange={(e) => dispatch({ type: 'SET_FILLET_RADIUS', payload: parseFloat(e.target.value) || 5 })}
-          style={{
-            width: '50px',
-            background: 'var(--bg-primary)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border)',
-            borderRadius: '3px',
-            padding: '2px 4px',
-            fontSize: '11px',
-            marginLeft: '4px',
-          }}
-          title="圓角半徑 (mm)"
-        />
-      )}
-
-      <div className="toolbar-separator" />
-
-      {/* 轉換與匯出 */}
-      <span className="toolbar-label">管線</span>
-      <button
-        className="btn btn-primary"
-        onClick={handleConvert}
-        disabled={state.isConverting}
-        style={{ fontSize: '11px', padding: '3px 10px' }}
-      >
-        {state.isConverting ? '轉換中...' : '體素→NURBS'}
-      </button>
-
-      <button
-        className="btn"
-        onClick={handleExport}
-        style={{ fontSize: '11px', padding: '3px 10px', marginLeft: '4px' }}
-      >
-        匯出 Rhino
-      </button>
-
-      <div style={{ flex: 1 }} />
-
-      {/* 視口設定 */}
-      <span className="toolbar-label">顯示</span>
-      <button
-        className={`toolbar-btn ${state.viewportSettings.showGrid ? 'active' : ''}`}
-        onClick={() => toggleViewport('showGrid')}
-        title="網格"
-      >
-        #
-      </button>
-      <button
-        className={`toolbar-btn ${state.viewportSettings.showAxes ? 'active' : ''}`}
-        onClick={() => toggleViewport('showAxes')}
-        title="座標軸"
-      >
-        +
-      </button>
-      <button
-        className={`toolbar-btn ${state.viewportSettings.showNurbs ? 'active' : ''}`}
-        onClick={() => toggleViewport('showNurbs')}
-        title="NURBS 曲面"
-      >
-        S
-      </button>
-      <button
-        className={`toolbar-btn ${state.viewportSettings.showWireframe ? 'active' : ''}`}
-        onClick={() => toggleViewport('showWireframe')}
-        title="線框"
-      >
-        W
-      </button>
+    <div className="app-toolbar-row">
+      <div className="toolbar-group">
+        {tools.map(t=>{const I=t.icon;return(<button key={t.id} className={`btn-icon ${activeTool===t.id?'active':''}`} onClick={()=>setTool(t.id)} title={`${t.label} (${t.key})`}><I size={15}/></button>);})}
+      </div>
+      <div className="toolbar-divider"/>
+      <div className="toolbar-group">
+        <span className="toolbar-label">語意</span>
+        {tags.map(t=>(<button key={t.id} className={`btn-sm ${activeTool===t.id?'active':''}`} onClick={()=>setTool(t.id)} style={{borderColor:activeTool===t.id?t.color:undefined,color:activeTool===t.id?t.color:undefined}}>{t.label}</button>))}
+      </div>
+      <div className="toolbar-divider"/>
+      <div className="toolbar-group">
+        <span className="toolbar-label">刷</span>
+        <input type="range" min={1} max={10} value={brushSize} onChange={e=>setBrushSize(+e.target.value)} style={{width:60}} title={`刷大小: ${brushSize}`}/>
+        <span className="text-xs text-muted" style={{width:16,textAlign:'center'}}>{brushSize}</span>
+      </div>
+      <div className="toolbar-divider"/>
+      <div className="toolbar-group">
+        <span className="toolbar-label">色</span>
+        <input type="color" value={paintColor} onChange={e=>setPaintColor(e.target.value)} className="color-swatch"/>
+      </div>
+      <div className="toolbar-divider"/>
+      <div className="toolbar-group">
+        <button className={`btn-sm ${viewMode==='wireframe'?'active':''}`} onClick={()=>setViewMode('wireframe')}>線框</button>
+        <button className={`btn-sm ${viewMode==='solid'?'active':''}`} onClick={()=>setViewMode('solid')}>實體</button>
+        <button className={`btn-sm ${viewMode==='rendered'?'active':''}`} onClick={()=>setViewMode('rendered')}>渲染</button>
+      </div>
+      <div className="toolbar-divider"/>
+      <div className="toolbar-group">
+        <button className={`btn-icon ${viewLayout==='single'?'active':''}`} onClick={()=>setViewLayout('single')} title="單視口"><Maximize2 size={14}/></button>
+        <button className={`btn-icon ${viewLayout==='quad'?'active':''}`} onClick={()=>setViewLayout('quad')} title="四視口"><Grid3x3 size={14}/></button>
+      </div>
+      <div className="toolbar-divider"/>
+      <div className="toolbar-group">
+        <span className="toolbar-label">選取</span>
+        {(['object','vertex','edge','face'] as SelectMode[]).map(m=>(<button key={m} className={`btn-sm ${selectMode===m?'active':''}`} onClick={()=>setSelectMode(m)}>{m==='object'?'物件':m==='vertex'?'點':m==='edge'?'邊':'面'}</button>))}
+      </div>
+      <div className="toolbar-spacer"/>
+      <div className="toolbar-group">
+        <button className="btn btn-primary" onClick={startPipeline} disabled={pipeline.status==='running'} style={{fontSize:11}}>
+          {pipeline.status==='running'?'轉換中...':'體素→NURBS'}
+        </button>
+      </div>
     </div>
   );
-};
-
-export default Toolbar;
+}

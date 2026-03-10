@@ -1,170 +1,94 @@
-/**
- * FastDesign - 主應用程式組件
- * 
- * 整合八大引擎、Event Bus、3D 視口、演算法管線。
- */
+import React, { useEffect, useState } from 'react';
+import { useStore } from './store/useStore';
+import { Toolbar } from './components/Toolbar';
+import { Viewport3D } from './components/viewport/Viewport3D';
+import { LayerPanel } from './components/panels/LayerPanel';
+import { PropertiesPanel } from './components/panels/PropertiesPanel';
+import { ConsolePanel } from './components/panels/ConsolePanel';
+import { AgentPanel } from './components/panels/AgentPanel';
+import { TexturePanel } from './components/panels/TexturePanel';
+import { LoadAnalysisPanel } from './components/panels/LoadAnalysisPanel';
+import { StatusBar } from './components/StatusBar';
+import { runVoxelToNURBS } from './pipeline/VoxelToNURBS';
+import { voxelEngine } from './engines/VoxelEngine';
+import { Layers, Bot, Image, BarChart3 } from 'lucide-react';
 
-import React, { useReducer, useEffect, useCallback, useRef } from 'react';
-import { AppContext, appReducer, initialState, LogEntry } from './store/AppStore';
-import { PipelineStage } from './store/DataModels';
-import signalBus, { SIGNALS } from './engines/EventBus';
-import { voxelToNURBSPipeline } from './pipeline/VoxelToNURBS';
-import { surfaceEngine } from './engines/SurfaceEngine';
-import { semanticEngine } from './engines/SemanticEngine';
-import { loadPhysicsEngine } from './engines/LoadPhysicsEngine';
-import engineManager from './engines/EngineManager';
-import Viewport3D from './components/Viewport3D';
-import Toolbar from './components/Toolbar';
-import LayerPanel from './components/LayerPanel';
-import PropertiesPanel from './components/PropertiesPanel';
-import ConsolePanel from './components/ConsolePanel';
-import StatusBar from './components/StatusBar';
-import { v4 as uuidv4 } from 'uuid';
+type RightTab = 'layers'|'agent'|'texture'|'load';
 
-const App: React.FC = () => {
-  const [state, dispatch] = useReducer(appReducer, initialState);
-  const commandInputRef = useRef<HTMLInputElement>(null);
-  const initialized = useRef(false);
+export default function App() {
+  const [rightTab, setRightTab] = useState<RightTab>('layers');
+  const pipeline=useStore(s=>s.pipeline), voxels=useStore(s=>s.voxels);
+  const addLog=useStore(s=>s.addLog), updatePipelineStage=useStore(s=>s.updatePipelineStage);
+  const completePipeline=useStore(s=>s.completePipeline), addVoxel=useStore(s=>s.addVoxel);
 
-  // Initialize engines
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
+  // Demo voxels
+  useEffect(()=>{
+    addLog('info','System','FastDesign v1.0 完整版已啟動');
+    addLog('info','System','八大引擎已初始化');
+    addLog('info','System','演算法管線 (Dual Contouring → PCA → NURBS) 就緒');
+    const colors=['#638cff','#4a90d9','#5b9bd5','#7eb8da'];
+    let c=0;
+    for(let x=-4;x<=4;x++) for(let z=-4;z<=4;z++){const v={id:`d_${c++}`,pos:{x,y:0,z},color:'#3a3a5c',layerId:'structure'};addVoxel(v);voxelEngine.addVoxel(v);}
+    for(const[px,pz]of[[-3,-3],[3,-3],[-3,3],[3,3]]) for(let y=1;y<=5;y++){const v={id:`d_${c++}`,pos:{x:px,y,z:pz},color:colors[y%colors.length],layerId:'structure'};addVoxel(v);voxelEngine.addVoxel(v);}
+    for(let x=-4;x<=4;x++) for(let z=-4;z<=4;z++){const v={id:`d_${c++}`,pos:{x,y:6,z},color:'#f5a623',layerId:'decoration'};addVoxel(v);voxelEngine.addVoxel(v);}
+    for(let y=1;y<=3;y++){const v={id:`d_${c++}`,pos:{x:0,y,z:0},color:'#a78bfa',layerId:'default'};addVoxel(v);voxelEngine.addVoxel(v);}
+    addLog('success','Demo',`已載入示範結構: ${c} 個體素`);
+  },[]);
 
-    // Initialize all engines
-    engineManager.initialize();
+  // Pipeline execution
+  useEffect(()=>{
+    if(pipeline.status!=='running')return;
+    (async()=>{
+      try{
+        const surfaces=await runVoxelToNURBS(voxels,pipeline.params,(s,st,p)=>updatePipelineStage(s,st,p),addLog);
+        completePipeline(surfaces);
+      }catch(e:any){addLog('error','Pipeline',`錯誤: ${e.message}`);}
+    })();
+  },[pipeline.status]);
 
-    // Subscribe to log messages
-    signalBus.subscribe(SIGNALS.LOG_MESSAGE, (payload) => {
-      const logEntry: LogEntry = {
-        id: uuidv4(),
-        timestamp: Date.now(),
-        level: payload.level || 'info',
-        source: payload.source || 'System',
-        message: payload.message || '',
-      };
-      dispatch({ type: 'ADD_LOG', payload: logEntry });
-    });
-
-    // Subscribe to pipeline state changes
-    signalBus.subscribe(SIGNALS.PIPELINE_STATE_CHANGED, (payload) => {
-      dispatch({
-        type: 'SET_PIPELINE_STATE',
-        payload: {
-          current_stage: payload.current_stage as PipelineStage,
-          progress: payload.progress,
-          message: payload.message,
-          started_at: payload.current_stage === 'boundary_extraction' ? Date.now() : undefined,
-          completed_at: payload.current_stage === 'completed' ? Date.now() : undefined,
-          result: payload.result || undefined,
-        },
-      });
-
-      if (payload.current_stage === 'boundary_extraction') {
-        dispatch({ type: 'SET_CONVERTING', payload: true });
+  // Keyboard shortcuts
+  useEffect(()=>{
+    const h=(e:KeyboardEvent)=>{
+      if(e.target instanceof HTMLInputElement||e.target instanceof HTMLTextAreaElement)return;
+      const s=useStore.getState();
+      switch(e.key.toLowerCase()){
+        case'v':s.setTool('select');break;case'b':e.shiftKey?s.setTool('brush'):s.setTool('place');break;
+        case'e':s.setTool('erase');break;case'p':s.setTool('paint');break;case'm':s.setTool('measure');break;
+        case'g':s.toggleGrid();break;case'x':s.toggleAxes();break;
+        case'1':s.setTool('tag-sharp');break;case'2':s.setTool('tag-smooth');break;case'3':s.setTool('tag-fillet');break;
+        case'5':s.setViewMode('wireframe');break;case'6':s.setViewMode('solid');break;case'7':s.setViewMode('rendered');break;
+        case'f':if(e.shiftKey)s.setTool('fill');break;case's':if(e.shiftKey)s.setTool('smooth');break;
+        case'c':if(e.shiftKey)s.setTool('sculpt');break;
       }
-      if (payload.current_stage === 'completed' || payload.current_stage === 'error') {
-        dispatch({ type: 'SET_CONVERTING', payload: false });
-      }
-    });
-
-    // Subscribe to NURBS conversion results
-    signalBus.subscribe(SIGNALS.NURBS_CONVERSION_DONE, (payload) => {
-      dispatch({ type: 'SET_NURBS_RESULT', payload: payload.result });
-    });
-
-    // Welcome message
-    signalBus.publish(SIGNALS.LOG_MESSAGE, {
-      level: 'info',
-      source: 'System',
-      message: 'FastDesign 次世代 3D 敏捷設計系統 v1.0.0',
-    });
-    signalBus.publish(SIGNALS.LOG_MESSAGE, {
-      level: 'info',
-      source: 'System',
-      message: '星狀拓撲 Event Bus 已啟動，八大引擎就緒',
-    });
-    signalBus.publish(SIGNALS.LOG_MESSAGE, {
-      level: 'info',
-      source: 'System',
-      message: '使用工具列放置體素，或輸入語意命令進行操作',
-    });
-
-    return () => {
-      engineManager.shutdown();
     };
-  }, []);
-
-  // Handle semantic command input
-  const handleCommandSubmit = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      const input = commandInputRef.current;
-      if (input && input.value.trim()) {
-        const text = input.value.trim();
-        signalBus.publish(SIGNALS.LOG_MESSAGE, {
-          level: 'info',
-          source: 'User',
-          message: `> ${text}`,
-        });
-        signalBus.publish('raw_command_input', { text });
-        input.value = '';
-      }
-    }
-  }, []);
+    window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h);
+  },[]);
 
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
-      <div className="app-container">
-        {/* Header */}
-        <div className="app-header">
-          <div className="app-header-title">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" fill="none" />
-            </svg>
-            FastDesign
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>
-              次世代 3D 敏捷設計系統
-            </span>
+    <div className="app-root">
+      <Toolbar/>
+      <div className="app-main">
+        <div className="app-sidebar left"><PropertiesPanel/></div>
+        <div className="app-center">
+          <div className="app-viewport"><Viewport3D/></div>
+          <ConsolePanel/>
+        </div>
+        <div className="app-sidebar right">
+          <div className="sidebar-tabs">
+            <button className={`sidebar-tab ${rightTab==='layers'?'active':''}`} onClick={()=>setRightTab('layers')} title="圖層"><Layers size={14}/></button>
+            <button className={`sidebar-tab ${rightTab==='agent'?'active':''}`} onClick={()=>setRightTab('agent')} title="AI 代理人"><Bot size={14}/></button>
+            <button className={`sidebar-tab ${rightTab==='texture'?'active':''}`} onClick={()=>setRightTab('texture')} title="貼圖"><Image size={14}/></button>
+            <button className={`sidebar-tab ${rightTab==='load'?'active':''}`} onClick={()=>setRightTab('load')} title="負載"><BarChart3 size={14}/></button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' } as any}>
-            {/* Semantic Command Input */}
-            <input
-              ref={commandInputRef}
-              className="prop-input"
-              placeholder="輸入語意命令 (例: mk arc, fillet 5, smooth)..."
-              onKeyDown={handleCommandSubmit}
-              style={{
-                width: '300px',
-                fontSize: '12px',
-                background: 'var(--bg-primary)',
-              }}
-            />
+          <div className="sidebar-content">
+            {rightTab==='layers'&&<LayerPanel/>}
+            {rightTab==='agent'&&<AgentPanel/>}
+            {rightTab==='texture'&&<TexturePanel/>}
+            {rightTab==='load'&&<LoadAnalysisPanel/>}
           </div>
         </div>
-
-        {/* Toolbar */}
-        <Toolbar />
-
-        {/* Main Content */}
-        <div className="app-main">
-          {/* Left Panel - Layers */}
-          <LayerPanel />
-
-          {/* Center - 3D Viewport + Console */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Viewport3D />
-            <ConsolePanel />
-          </div>
-
-          {/* Right Panel - Properties */}
-          <PropertiesPanel />
-        </div>
-
-        {/* Status Bar */}
-        <StatusBar />
       </div>
-    </AppContext.Provider>
+      <StatusBar/>
+    </div>
   );
-};
-
-export default App;
+}
