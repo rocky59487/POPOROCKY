@@ -1,47 +1,110 @@
 import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Grid, GizmoHelper, GizmoViewport, Line, PerspectiveCamera, OrthographicCamera } from '@react-three/drei';
+import { OrbitControls, Grid, GizmoHelper, GizmoViewport, Line, PerspectiveCamera, OrthographicCamera, Environment, ContactShadows, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useStore, Voxel, DEFAULT_MATERIALS } from '../../store/useStore';
 import { voxelEngine } from '../../engines/VoxelEngine';
-import { loadEngine } from '../../engines/LoadEngine';
+import { loadEngine, MATERIAL_PRESETS } from '../../engines/LoadEngine';
 import { getLatestPipelineResult } from '../../pipeline/VoxelToNURBS';
+import eventBus from '../../engines/EventBus';
+
+/* ─── Material Color Map ─── */
+const MATERIAL_COLORS: Record<string, { color: string; roughness: number; metalness: number }> = {
+  concrete: { color: '#808080', roughness: 0.9, metalness: 0.0 },
+  steel:    { color: '#C0C0C0', roughness: 0.2, metalness: 0.8 },
+  wood:     { color: '#8B4513', roughness: 0.8, metalness: 0.0 },
+  brick:    { color: '#8B3A3A', roughness: 0.85, metalness: 0.0 },
+  aluminum: { color: '#d0d0e0', roughness: 0.3, metalness: 0.7 },
+  glass:    { color: '#88ccee', roughness: 0.1, metalness: 0.1 },
+};
 
 /* ============================================================
-   Voxel Rendering (InstancedMesh)
+   Voxel Rendering (InstancedMesh) with Material Colors
    ============================================================ */
 function VoxelInstances() {
   const voxels = useStore(s => s.voxels);
   const selectedIds = useStore(s => s.selectedVoxelIds);
   const viewMode = useStore(s => s.viewMode);
+  const layers = useStore(s => s.layers);
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const edgesRef = useRef<THREE.LineSegments>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
+  // Filter visible voxels based on layer visibility
+  const visibleVoxels = useMemo(() => {
+    const visibleLayerIds = new Set(layers.filter(l => l.visible).map(l => l.id));
+    return voxels.filter(v => visibleLayerIds.has(v.layerId));
+  }, [voxels, layers]);
+
   useEffect(() => {
-    if (!meshRef.current || voxels.length === 0) return;
+    if (!meshRef.current || visibleVoxels.length === 0) return;
     const mesh = meshRef.current;
-    voxels.forEach((v, i) => {
+
+    visibleVoxels.forEach((v, i) => {
       dummy.position.set(v.pos.x, v.pos.y, v.pos.z);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
-      let color = v.color;
-      if (v.isSupport) color = '#00ffff';
-      else if (v.externalLoad && (v.externalLoad.x !== 0 || v.externalLoad.y !== 0 || v.externalLoad.z !== 0)) color = '#ff00ff';
-      if (selectedIds.includes(v.id)) color = '#ffffff';
+
+      // Determine color based on material or state
+      let color: string;
+      if (selectedIds.includes(v.id)) {
+        color = '#ffffff';
+      } else if (v.isSupport) {
+        color = '#00e5ff'; // Cyan for support points
+      } else if (v.externalLoad && (v.externalLoad.x !== 0 || v.externalLoad.y !== 0 || v.externalLoad.z !== 0)) {
+        color = '#ff4081'; // Pink for load points
+      } else {
+        // Use material-specific color
+        const matColor = MATERIAL_COLORS[v.materialId || ''];
+        color = matColor ? matColor.color : v.color;
+      }
       mesh.setColorAt(i, new THREE.Color(color));
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [voxels, selectedIds, dummy]);
+    mesh.count = visibleVoxels.length;
+  }, [visibleVoxels, selectedIds, dummy]);
 
-  if (voxels.length === 0) return null;
+  // Wireframe edges overlay
+  const edgesGeo = useMemo(() => {
+    if (viewMode !== 'wireframe' || visibleVoxels.length === 0) return null;
+    const positions: number[] = [];
+    const box = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+    const edges = new THREE.EdgesGeometry(box);
+    const edgePositions = edges.getAttribute('position').array;
+
+    for (const v of visibleVoxels) {
+      for (let j = 0; j < edgePositions.length; j += 3) {
+        positions.push(
+          edgePositions[j] + v.pos.x,
+          edgePositions[j + 1] + v.pos.y,
+          edgePositions[j + 2] + v.pos.z
+        );
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    return geo;
+  }, [visibleVoxels, viewMode]);
+
+  if (visibleVoxels.length === 0) return null;
+
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, Math.max(voxels.length, 1)]} castShadow receiveShadow>
-      <boxGeometry args={[0.95, 0.95, 0.95]} />
-      {viewMode === 'wireframe'
-        ? <meshBasicMaterial wireframe color="#555577" />
-        : <meshStandardMaterial roughness={0.6} metalness={0.1} vertexColors />}
-    </instancedMesh>
+    <group>
+      <instancedMesh ref={meshRef} args={[undefined, undefined, Math.max(visibleVoxels.length, 1)]} castShadow receiveShadow>
+        <boxGeometry args={[0.95, 0.95, 0.95]} />
+        {viewMode === 'wireframe'
+          ? <meshBasicMaterial wireframe color="#555577" transparent opacity={0.1} />
+          : viewMode === 'rendered'
+            ? <meshPhysicalMaterial roughness={0.5} metalness={0.15} vertexColors clearcoat={0.1} clearcoatRoughness={0.4} envMapIntensity={0.8} />
+            : <meshStandardMaterial roughness={0.6} metalness={0.1} vertexColors />}
+      </instancedMesh>
+      {edgesGeo && (
+        <lineSegments geometry={edgesGeo}>
+          <lineBasicMaterial color="#8888aa" transparent opacity={0.6} />
+        </lineSegments>
+      )}
+    </group>
   );
 }
 
@@ -52,9 +115,7 @@ function StressOverlay() {
   const feaResult = useStore(s => s.loadAnalysis.result);
   const showOverlay = useStore(s => s.loadAnalysis.showStressOverlay);
   const lineRef = useRef<THREE.LineSegments>(null);
-  const materialRef = useRef<THREE.LineBasicMaterial>(null);
 
-  // Build geometry with per-edge colors
   const { geometry, dangerIndices } = useMemo(() => {
     if (!feaResult || !showOverlay || feaResult.edges.length === 0) return { geometry: null, dangerIndices: [] as number[] };
 
@@ -76,13 +137,9 @@ function StressOverlay() {
         const t = Math.min((ratio - 0.5) / 0.5, 1.0);
         r = 1.0; g = 1.0 - t; b = 0;
       }
-      colors.push(r, g, b);
-      colors.push(r, g, b);
+      colors.push(r, g, b, r, g, b);
 
-      // Track danger edges for flashing
-      if (edge.stressRatio > 0.8) {
-        danger.push(ei);
-      }
+      if (edge.stressRatio > 0.8) danger.push(ei);
     }
 
     const geo = new THREE.BufferGeometry();
@@ -104,32 +161,125 @@ function StressOverlay() {
     for (const ei of dangerIndices) {
       const edge = feaResult.edges[ei];
       const ratio = Math.min(edge.stressRatio, 1.5);
-
-      // Base color (red for danger)
-      let baseR = 1.0, baseG = 0, baseB = 0;
+      let baseR = 1.0, baseG = 0;
       if (ratio <= 1.0) {
         const t = Math.min((ratio - 0.5) / 0.5, 1.0);
         baseG = 1.0 - t;
       }
-
-      // Flash: modulate brightness
       const brightness = 0.3 + 0.7 * flash;
-      const r = baseR * brightness;
-      const g = baseG * brightness;
-      const b = baseB;
-
-      colorAttr.setXYZ(ei * 2, r, g, b);
-      colorAttr.setXYZ(ei * 2 + 1, r, g, b);
+      colorAttr.setXYZ(ei * 2, baseR * brightness, baseG * brightness, 0);
+      colorAttr.setXYZ(ei * 2 + 1, baseR * brightness, baseG * brightness, 0);
     }
     colorAttr.needsUpdate = true;
   });
 
   if (!geometry) return null;
-
   return (
     <lineSegments ref={lineRef} geometry={geometry}>
-      <lineBasicMaterial ref={materialRef} vertexColors linewidth={2} transparent opacity={0.9} depthTest={false} />
+      <lineBasicMaterial vertexColors linewidth={2} transparent opacity={0.9} depthTest={false} />
     </lineSegments>
+  );
+}
+
+/* ============================================================
+   Glue Joint Visualization
+   ============================================================ */
+function GlueJointViz() {
+  const [joints, setJoints] = useState<{ a: THREE.Vector3; b: THREE.Vector3; type: string }[]>([]);
+
+  useEffect(() => {
+    const onAdd = (data: any) => {
+      setJoints(prev => [...prev, {
+        a: new THREE.Vector3(data.voxelA.x, data.voxelA.y, data.voxelA.z),
+        b: new THREE.Vector3(data.voxelB.x, data.voxelB.y, data.voxelB.z),
+        type: data.type || 'rigid',
+      }]);
+    };
+    const onRemove = (data: any) => {
+      setJoints(prev => prev.filter(j =>
+        !(j.a.x === data.voxelA.x && j.a.y === data.voxelA.y && j.a.z === data.voxelA.z &&
+          j.b.x === data.voxelB.x && j.b.y === data.voxelB.y && j.b.z === data.voxelB.z)
+      ));
+    };
+    eventBus.on('glue:add', onAdd);
+    eventBus.on('glue:remove', onRemove);
+    return () => { eventBus.off('glue:add', onAdd); eventBus.off('glue:remove', onRemove); };
+  }, []);
+
+  return (
+    <group>
+      {joints.map((j, i) => {
+        const mid = j.a.clone().add(j.b).multiplyScalar(0.5);
+        const color = j.type === 'rigid' ? '#00ff88' : j.type === 'hinge' ? '#ffaa00' : '#88aaff';
+        return (
+          <group key={`glue_${i}`}>
+            <Line points={[j.a.toArray(), j.b.toArray()]} color={color} lineWidth={4} dashed dashSize={0.1} gapSize={0.05} />
+            <mesh position={mid}>
+              <sphereGeometry args={[0.08, 8, 8]} />
+              <meshBasicMaterial color={color} />
+            </mesh>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+/* ============================================================
+   Measurement Tool Visualization
+   ============================================================ */
+function MeasurementViz() {
+  const tool = useStore(s => s.activeTool);
+  const [points, setPoints] = useState<THREE.Vector3[]>([]);
+  const [measurements, setMeasurements] = useState<{ points: THREE.Vector3[]; distance: number; label: string }[]>([]);
+
+  // Listen for measurement clicks
+  useEffect(() => {
+    if (tool !== 'measure') {
+      setPoints([]);
+      return;
+    }
+    const handler = (data: { point: THREE.Vector3 }) => {
+      setPoints(prev => {
+        const next = [...prev, data.point];
+        if (next.length === 2) {
+          const dist = next[0].distanceTo(next[1]);
+          setMeasurements(prev => [...prev, {
+            points: next,
+            distance: dist,
+            label: `${dist.toFixed(2)} u`,
+          }]);
+          return [];
+        }
+        return next;
+      });
+    };
+    eventBus.on('measure:point', handler);
+    return () => { eventBus.off('measure:point', handler); };
+  }, [tool]);
+
+  return (
+    <group>
+      {/* Active measurement points */}
+      {points.map((p, i) => (
+        <mesh key={`mp_${i}`} position={p}>
+          <sphereGeometry args={[0.12, 8, 8]} />
+          <meshBasicMaterial color="#ffff00" />
+        </mesh>
+      ))}
+      {/* Completed measurements */}
+      {measurements.map((m, i) => {
+        const mid = m.points[0].clone().add(m.points[1]).multiplyScalar(0.5);
+        return (
+          <group key={`meas_${i}`}>
+            <Line points={[m.points[0].toArray(), m.points[1].toArray()]} color="#ffff00" lineWidth={2} />
+            <Html position={[mid.x, mid.y + 0.3, mid.z]} center style={{ pointerEvents: 'none' }}>
+              <div className="measure-label">{m.label}</div>
+            </Html>
+          </group>
+        );
+      })}
+    </group>
   );
 }
 
@@ -149,7 +299,6 @@ function PipelineResultViz() {
       setFeatureLines([]);
       return;
     }
-
     const result = getLatestPipelineResult();
     if (!result) return;
 
@@ -170,42 +319,15 @@ function PipelineResultViz() {
         if (tess && tess.points && tess.faces) {
           const geo = new THREE.BufferGeometry();
           const positions: number[] = [];
-          const indices: number[] = [];
           tess.points.forEach((p: number[]) => positions.push(p[0], p[1], p[2]));
+          const indices: number[] = [];
           tess.faces.forEach((f: number[]) => indices.push(f[0], f[1], f[2]));
           geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
           geo.setIndex(indices);
           geo.computeVertexNormals();
           setNurbsGeo(geo);
         }
-      } catch (e) {
-        console.warn('NURBS tessellation failed:', e);
-      }
-    }
-
-    if (!nurbsGeo && result.surfaces.length > 0) {
-      const s = result.surfaces[0];
-      const pts: number[] = [];
-      const idx: number[] = [];
-      for (let i = 0; i < s.controlPoints.length; i++) {
-        for (let j = 0; j < s.controlPoints[i].length; j++) {
-          const p = s.controlPoints[i][j];
-          pts.push(p.x, p.y, p.z);
-          if (i > 0 && j > 0) {
-            const cols = s.controlPoints[0].length;
-            const a = i * cols + j;
-            const b = (i - 1) * cols + j;
-            const c = (i - 1) * cols + (j - 1);
-            const d = i * cols + (j - 1);
-            idx.push(a, b, c, a, c, d);
-          }
-        }
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-      if (idx.length > 0) geo.setIndex(idx);
-      geo.computeVertexNormals();
-      setNurbsGeo(geo);
+      } catch (e) { console.warn('NURBS tessellation failed:', e); }
     }
   }, [pipeline.status, pipeline.result]);
 
@@ -218,22 +340,12 @@ function PipelineResultViz() {
       )}
       {nurbsGeo && (
         <mesh geometry={nurbsGeo}>
-          <meshStandardMaterial color="#a78bfa" transparent opacity={0.6} side={THREE.DoubleSide} metalness={0.2} roughness={0.4} />
+          <meshPhysicalMaterial color="#a78bfa" transparent opacity={0.6} side={THREE.DoubleSide} metalness={0.3} roughness={0.3} clearcoat={0.5} />
         </mesh>
       )}
       {featureLines.map((edge, i) => (
         <Line key={`fe_${i}`} points={[edge.a as [number,number,number], edge.b as [number,number,number]]} color="#ffff00" lineWidth={3} />
       ))}
-      {pipeline.status === 'done' && pipeline.result?.map((s: any, si: number) =>
-        s.controlPoints.map((row: any[], ri: number) =>
-          row.map((cp: any, ci: number) => (
-            <mesh key={`cp_${si}_${ri}_${ci}`} position={[cp.x, cp.y, cp.z]}>
-              <sphereGeometry args={[0.1, 6, 6]} />
-              <meshBasicMaterial color="#a78bfa" />
-            </mesh>
-          ))
-        )
-      )}
     </group>
   );
 }
@@ -357,7 +469,7 @@ function PerfMonitor() {
 }
 
 /* ============================================================
-   Click Handler (voxel placement, support/load setting, material change)
+   Click Handler (voxel placement, support/load, material, measure)
    ============================================================ */
 function ClickHandler() {
   const tool = useStore(s => s.activeTool);
@@ -372,6 +484,7 @@ function ClickHandler() {
   const setVoxelExternalLoad = useStore(s => s.setVoxelExternalLoad);
   const updateVoxel = useStore(s => s.updateVoxel);
   const selectVoxels = useStore(s => s.selectVoxels);
+  const selectedVoxelIds = useStore(s => s.selectedVoxelIds);
   const voxels = useStore(s => s.voxels);
   const addLog = useStore(s => s.addLog);
 
@@ -384,16 +497,31 @@ function ClickHandler() {
       Math.abs(v.pos.x - pos.x) < 0.6 && Math.abs(v.pos.y - pos.y) < 0.6 && Math.abs(v.pos.z - pos.z) < 0.6
     );
 
+    if (tool === 'measure') {
+      eventBus.emit('measure:point', { point: new THREE.Vector3(pos.x, pos.y, pos.z) });
+      return;
+    }
+
     if (tool === 'select' && clickedVoxel) {
-      selectVoxels([clickedVoxel.id]);
+      if (e.nativeEvent.shiftKey) {
+        // Multi-select with Shift
+        const newIds = selectedVoxelIds.includes(clickedVoxel.id)
+          ? selectedVoxelIds.filter(id => id !== clickedVoxel.id)
+          : [...selectedVoxelIds, clickedVoxel.id];
+        selectVoxels(newIds);
+      } else {
+        selectVoxels([clickedVoxel.id]);
+      }
     } else if (tool === 'place') {
       const n = e.face?.normal;
       const pp = n ? { x: pos.x + Math.round(n.x), y: pos.y + Math.round(n.y), z: pos.z + Math.round(n.z) } : { ...pos, y: pos.y + 1 };
       const preset = loadEngine.getMaterialPreset(activeVoxelMaterial);
       const mat = preset ? { ...preset.material } : (DEFAULT_MATERIALS[activeVoxelMaterial] || DEFAULT_MATERIALS.concrete);
+      const matColor = MATERIAL_COLORS[activeVoxelMaterial];
       const v: Voxel = {
         id: `v_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-        pos: pp, color, layerId, material: { ...mat }, isSupport: false, materialId: activeVoxelMaterial,
+        pos: pp, color: matColor ? matColor.color : color, layerId,
+        material: { ...mat }, isSupport: false, materialId: activeVoxelMaterial,
       };
       addVoxel(v);
       voxelEngine.addVoxel(v);
@@ -419,7 +547,7 @@ function ClickHandler() {
         addLog('info', 'FEA', `施加外部負載 (${pos.x},${pos.y},${pos.z}) [0, -50000, 0] N`);
       }
     }
-  }, [tool, color, layerId, bSize, bShape, activeVoxelMaterial, addVoxel, removeVoxel, addLog, voxels, toggleVoxelSupport, setVoxelExternalLoad, selectVoxels, updateVoxel]);
+  }, [tool, color, layerId, bSize, bShape, activeVoxelMaterial, addVoxel, removeVoxel, addLog, voxels, toggleVoxelSupport, setVoxelExternalLoad, selectVoxels, updateVoxel, selectedVoxelIds]);
 
   // Right-click to change material
   const handleContextMenu = useCallback((e: ThreeEvent<MouseEvent>) => {
@@ -431,8 +559,13 @@ function ClickHandler() {
     );
     if (clickedVoxel) {
       const preset = loadEngine.getMaterialPreset(activeVoxelMaterial);
+      const matColor = MATERIAL_COLORS[activeVoxelMaterial];
       if (preset) {
-        updateVoxel(clickedVoxel.id, { material: { ...preset.material }, materialId: activeVoxelMaterial });
+        updateVoxel(clickedVoxel.id, {
+          material: { ...preset.material },
+          materialId: activeVoxelMaterial,
+          color: matColor ? matColor.color : clickedVoxel.color,
+        });
         addLog('info', 'Material', `更換材質 (${pos.x},${pos.y},${pos.z}) → ${preset.name}`);
       }
     }
@@ -447,6 +580,88 @@ function ClickHandler() {
 }
 
 /* ============================================================
+   Complete Lighting System
+   ============================================================ */
+function LightingSystem() {
+  const viewMode = useStore(s => s.viewMode);
+
+  if (viewMode === 'wireframe') {
+    return <ambientLight intensity={1.0} />;
+  }
+
+  return (
+    <group>
+      {/* Ambient fill */}
+      <ambientLight intensity={0.15} color="#b0b8d0" />
+
+      {/* Key light - warm directional */}
+      <directionalLight
+        position={[15, 25, 10]}
+        intensity={1.2}
+        color="#fff5e6"
+        castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-far={80}
+        shadow-camera-left={-20}
+        shadow-camera-right={20}
+        shadow-camera-top={20}
+        shadow-camera-bottom={-20}
+        shadow-bias={-0.001}
+      />
+
+      {/* Fill light - cool blue */}
+      <directionalLight position={[-10, 15, -8]} intensity={0.4} color="#c0d0ff" />
+
+      {/* Rim / back light */}
+      <directionalLight position={[0, 10, -15]} intensity={0.3} color="#e0e8ff" />
+
+      {/* Hemisphere light for natural sky/ground bounce */}
+      <hemisphereLight args={['#87CEEB', '#2a2a3e', 0.35]} />
+
+      {/* Point light for local highlight */}
+      <pointLight position={[0, 8, 0]} intensity={0.3} color="#ffffff" distance={30} decay={2} />
+
+      {/* Contact shadows on ground */}
+      <ContactShadows
+        position={[0, -0.49, 0]}
+        opacity={0.4}
+        scale={40}
+        blur={2}
+        far={20}
+        color="#000000"
+      />
+    </group>
+  );
+}
+
+/* ============================================================
+   Selection Box Indicator
+   ============================================================ */
+function SelectionIndicator() {
+  const selectedIds = useStore(s => s.selectedVoxelIds);
+  const voxels = useStore(s => s.voxels);
+
+  const selectedVoxels = useMemo(() =>
+    voxels.filter(v => selectedIds.includes(v.id)),
+    [voxels, selectedIds]
+  );
+
+  if (selectedVoxels.length === 0) return null;
+
+  return (
+    <group>
+      {selectedVoxels.map(v => (
+        <mesh key={`sel_${v.id}`} position={[v.pos.x, v.pos.y, v.pos.z]}>
+          <boxGeometry args={[1.02, 1.02, 1.02]} />
+          <meshBasicMaterial color="#638cff" wireframe transparent opacity={0.5} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/* ============================================================
    Main Scene Export
    ============================================================ */
 export function ViewportScene({ label }: { label?: string }) {
@@ -455,9 +670,11 @@ export function ViewportScene({ label }: { label?: string }) {
   const camType = useStore(s => s.cameraType);
   const fpMode = useStore(s => s.fpMode);
   const setFpMode = useStore(s => s.setFpMode);
+  const selectedCount = useStore(s => s.selectedVoxelIds.length);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* First person mode prompt */}
       {!fpMode && (
         <div
           style={{
@@ -469,39 +686,79 @@ export function ViewportScene({ label }: { label?: string }) {
           }}
           onClick={() => setFpMode(true)}
         >
-          點擊進入第一人稱模式 (WASD 移動 / 滑鼠視角 / Shift 加速 / Esc 退出)
+          點擊進入第一人稱模式 (WASD / 滑鼠 / Shift 加速 / Esc 退出)
         </div>
       )}
+
+      {/* Selection count badge */}
+      {selectedCount > 0 && (
+        <div style={{
+          position: 'absolute', top: 8, right: 8, zIndex: 10,
+          padding: '3px 8px', borderRadius: 4,
+          background: 'rgba(99,140,255,0.15)', border: '1px solid rgba(99,140,255,0.3)',
+          fontSize: 10, color: '#638cff',
+        }}>
+          已選取 {selectedCount} 個體素
+        </div>
+      )}
+
+      {/* FP crosshair */}
       {fpMode && (
         <div style={{
           position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
           zIndex: 10, pointerEvents: 'none', fontSize: 24, color: 'rgba(255,255,255,0.3)', fontWeight: 'bold',
         }}>+</div>
       )}
-      <Canvas gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }} style={{ background: '#0a0a0f' }} shadows>
+
+      <Canvas
+        gl={{ antialias: true, alpha: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true }}
+        style={{ background: '#0a0a0f' }}
+        shadows
+        dpr={[1, 2]}
+      >
         {camType === 'perspective'
-          ? <PerspectiveCamera makeDefault position={[15, 12, 15]} fov={50} />
-          : <OrthographicCamera makeDefault position={[15, 12, 15]} zoom={20} />}
+          ? <PerspectiveCamera makeDefault position={[15, 12, 15]} fov={50} near={0.1} far={500} />
+          : <OrthographicCamera makeDefault position={[15, 12, 15]} zoom={20} near={-500} far={500} />}
 
-        <ambientLight intensity={0.3} />
-        <directionalLight position={[10, 20, 10]} intensity={0.8} castShadow />
-        <directionalLight position={[-5, 10, -5]} intensity={0.3} />
-        <hemisphereLight args={['#1a1a2e', '#0a0a0f', 0.4]} />
+        {/* Complete Lighting System */}
+        <LightingSystem />
 
+        {/* Grid */}
         {showGrid && (
           <Grid args={[100, 100]} cellSize={1} cellThickness={0.5} cellColor="#1a1a2e"
             sectionSize={5} sectionThickness={1} sectionColor="#252540" fadeDistance={80} infiniteGrid />
         )}
+
+        {/* Axes */}
         {showAxes && (
           <group>
             <Line points={[[0,0,0],[10,0,0]]} color="#ff4757" lineWidth={2} />
             <Line points={[[0,0,0],[0,10,0]]} color="#3dd68c" lineWidth={2} />
             <Line points={[[0,0,0],[0,0,10]]} color="#638cff" lineWidth={2} />
+            {/* Axis labels */}
+            <Html position={[10.5, 0, 0]} center style={{ pointerEvents: 'none' }}>
+              <span style={{ color: '#ff4757', fontSize: 10, fontWeight: 'bold' }}>X</span>
+            </Html>
+            <Html position={[0, 10.5, 0]} center style={{ pointerEvents: 'none' }}>
+              <span style={{ color: '#3dd68c', fontSize: 10, fontWeight: 'bold' }}>Y</span>
+            </Html>
+            <Html position={[0, 0, 10.5]} center style={{ pointerEvents: 'none' }}>
+              <span style={{ color: '#638cff', fontSize: 10, fontWeight: 'bold' }}>Z</span>
+            </Html>
           </group>
         )}
 
+        {/* Ground plane (subtle) */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]} receiveShadow>
+          <planeGeometry args={[100, 100]} />
+          <meshStandardMaterial color="#0e0e16" roughness={0.95} metalness={0} transparent opacity={0.5} />
+        </mesh>
+
         <VoxelInstances />
+        <SelectionIndicator />
         <StressOverlay />
+        <GlueJointViz />
+        <MeasurementViz />
         <PipelineResultViz />
         <ClickHandler />
 
@@ -512,7 +769,7 @@ export function ViewportScene({ label }: { label?: string }) {
           <GizmoViewport labelColor="white" axisHeadScale={0.8} />
         </GizmoHelper>
         <PerfMonitor />
-        <fog attach="fog" args={['#0a0a0f', 60, 120]} />
+        <fog attach="fog" args={['#0a0a0f', 60, 150]} />
       </Canvas>
     </div>
   );

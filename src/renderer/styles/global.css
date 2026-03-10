@@ -180,3 +180,177 @@ input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 input[type="color"]::-webkit-color-swatch { border: 1px solid var(--border); border-radius: 3px; }
 input[type="number"] { -moz-appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+/* ═══ Command Line ═══ */
+.command-line-container {
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 20;
+}
+.command-line-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 3px var(--sp-3);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+.command-line-header:hover { background: rgba(255,255,255,0.04); }
+.command-line-history {
+  max-height: 120px;
+  overflow-y: auto;
+  padding: var(--sp-1) var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  line-height: 1.7;
+  background: var(--bg-base);
+}
+.cmd-line { white-space: pre-wrap; word-break: break-all; }
+.cmd-line.cmd-input { color: var(--text-primary); }
+.cmd-line.cmd-output { color: var(--success); }
+.cmd-line.cmd-error { color: var(--error); }
+.cmd-prompt { color: var(--accent); font-weight: 700; }
+
+.command-line-input-area {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+}
+.cmd-input-prompt { color: var(--accent); flex-shrink: 0; }
+.command-line-input {
+  flex: 1;
+  height: 24px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  caret-color: var(--accent);
+}
+.command-line-input::placeholder { color: var(--text-muted); }
+.cmd-param-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  padding: 2px 6px;
+  background: rgba(255,255,255,0.03);
+  border-radius: var(--radius-sm);
+}
+
+.command-line-suggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  box-shadow: var(--shadow-lg);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 30;
+}
+.cmd-suggestion {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  font-size: var(--font-sm);
+}
+.cmd-suggestion:hover, .cmd-suggestion.selected {
+  background: var(--bg-button-hover);
+}
+.cmd-suggestion-name {
+  font-weight: 600;
+  font-family: var(--font-mono);
+  min-width: 80px;
+}
+.cmd-suggestion-syntax {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  min-width: 180px;
+}
+.cmd-suggestion-desc {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ═══ Glue Joint Visualization ═══ */
+.glue-indicator {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* ═══ Material Color Indicators ═══ */
+.material-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+}
+.material-swatch:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-button-hover);
+}
+.material-swatch.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.material-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+/* ═══ Selection Highlight ═══ */
+.selection-info {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  background: rgba(99,140,255,0.1);
+  border: 1px solid rgba(99,140,255,0.2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--accent);
+}
+
+/* ═══ Measurement Labels ═══ */
+.measure-label {
+  position: absolute;
+  padding: 2px 6px;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 100;
+}

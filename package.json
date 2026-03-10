@@ -22,6 +22,7 @@
     "@react-three/fiber": "^9.5.0",
     "bitecs": "^0.4.0",
     "electron": "^40.8.0",
+    "fuse.js": "^7.1.0",
     "immer": "^11.1.4",
     "json-rules-engine": "^7.3.1",
     "lucide-react": "^0.577.0",
