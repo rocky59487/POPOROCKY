@@ -68,7 +68,6 @@ function buildMenu(): void {
       { label: '語意引擎', click: () => send('engine:semantic') },
       { label: '負載引擎', click: () => send('engine:load') },
       { label: '圖層引擎', click: () => send('engine:layer') },
-      { label: '代理人引擎', click: () => send('engine:agent') },
       { label: '多人引擎', click: () => send('engine:multiplayer') },
       { label: '貼圖引擎', click: () => send('engine:texture') },
       { label: 'LOD 引擎', click: () => send('engine:lod') },
@@ -91,6 +90,9 @@ function buildMenu(): void {
       { label: '語意: Sharp', accelerator: '1', click: () => send('tool:tag-sharp') },
       { label: '語意: Smooth', accelerator: '2', click: () => send('tool:tag-smooth') },
       { label: '語意: Fillet', accelerator: '3', click: () => send('tool:tag-fillet') },
+      { type: 'separator' },
+      { label: '設定支撐點', click: () => send('tool:set-support') },
+      { label: '施加負載', click: () => send('tool:set-load') },
     ]},
     { label: 'Help', submenu: [
       { label: '關於 FastDesign', click: () => send('help:about') },

@@ -28,6 +28,11 @@ module.exports = {
   },
   resolve: {
     extensions: ['.tsx', '.ts', '.js', '.jsx'],
+    fallback: {
+      fs: false,
+      path: false,
+      crypto: false,
+    },
   },
   output: {
     path: path.resolve(__dirname, 'dist/renderer'),

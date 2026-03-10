@@ -1,5 +1,5 @@
 import eventBus from './EventBus';
-import { Vec3, Layer, PBRMaterial, LODLevel, AgentMessage, CollabUser } from '../store/useStore';
+import { Vec3, Layer, PBRMaterial, LODLevel, CollabUser } from '../store/useStore';
 
 export class LayerEngine {
   private layers: Layer[] = [];
@@ -8,21 +8,6 @@ export class LayerEngine {
   removeLayer(id: string) { this.layers = this.layers.filter(l=>l.id!==id); eventBus.emit('layer:removed', id); }
   duplicateLayer(id: string): Layer|null { const s=this.layers.find(l=>l.id===id); if(!s)return null; const d={...s,id:`layer_${Date.now()}`,name:`${s.name} (複製)`,order:this.layers.length,voxelCount:0}; this.layers.push(d); return d; }
   reorder(from: number, to: number) { const [item]=this.layers.splice(from,1); this.layers.splice(to,0,item); this.layers.forEach((l,i)=>l.order=i); }
-}
-
-export class AgentEngine {
-  private history: AgentMessage[] = [];
-  async suggest(_ctx: string): Promise<string> {
-    eventBus.emit('agent:thinking', true);
-    await new Promise(r=>setTimeout(r,500));
-    const suggestions=['建議在結構弱點處增加支撐體素','建議使用 Smooth 語意標籤優化曲面過渡','建議啟用 LOD 以提升大型場景效能','建議對裝飾圖層使用 Fillet 圓角處理','偵測到懸空結構，建議增加底部支撐','可以嘗試對稱複製來加速建模','建議執行負載分析確認結構安全性'];
-    const r=suggestions[Math.floor(Math.random()*suggestions.length)];
-    this.history.push({role:'agent',content:r,ts:Date.now()});
-    eventBus.emit('agent:thinking',false);
-    return r;
-  }
-  checkRules(_voxels: any[]): {passed:boolean;violations:string[]} { return {passed:true,violations:[]}; }
-  getHistory() { return this.history; }
 }
 
 export class MultiplayerEngine {
@@ -67,7 +52,6 @@ export class LODEngine {
 }
 
 export const layerEngine = new LayerEngine();
-export const agentEngine = new AgentEngine();
 export const multiplayerEngine = new MultiplayerEngine();
 export const textureEngine = new TextureEngine();
 export const lodEngine = new LODEngine();

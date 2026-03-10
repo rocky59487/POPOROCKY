@@ -1,5 +1,5 @@
 import eventBus from './EventBus';
-import { Vec3, Voxel, SemanticTag } from '../store/useStore';
+import { Vec3, Voxel, SemanticTag, DEFAULT_MATERIALS } from '../store/useStore';
 
 const CHUNK_SIZE = 16;
 function chunkKey(cx: number, cy: number, cz: number) { return `${cx},${cy},${cz}`; }
@@ -62,7 +62,7 @@ export class VoxelEngine {
       const pos = { x: center.x + dx, y: center.y + dy, z: center.z + dz };
       let inBrush = shape === 'sphere' ? Math.sqrt(dx*dx+dy*dy+dz*dz) <= radius : shape === 'cylinder' ? Math.sqrt(dx*dx+dz*dz) <= radius && Math.abs(dy) <= radius : true;
       if (inBrush) {
-        const v: Voxel = { id: `v_${Date.now()}_${dx}_${dy}_${dz}`, pos, color, layerId, semanticTag: tag };
+        const v: Voxel = { id: `v_${Date.now()}_${dx}_${dy}_${dz}`, pos, color, layerId, semanticTag: tag, material: { ...DEFAULT_MATERIALS.concrete }, isSupport: false };
         if (this.addVoxel(v)) placed.push(v);
       }
     }

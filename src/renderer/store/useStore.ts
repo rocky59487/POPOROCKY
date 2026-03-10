@@ -4,7 +4,7 @@ import { immer } from 'zustand/middleware/immer';
 /* ============================================================
    Types
    ============================================================ */
-export type ToolType = 'select'|'place'|'erase'|'paint'|'brush'|'smooth'|'fill'|'sculpt'|'measure'|'tag-sharp'|'tag-smooth'|'tag-fillet';
+export type ToolType = 'select'|'place'|'erase'|'paint'|'brush'|'smooth'|'fill'|'sculpt'|'measure'|'tag-sharp'|'tag-smooth'|'tag-fillet'|'set-support'|'set-load';
 export type ViewMode = 'wireframe'|'solid'|'rendered';
 export type ViewLayout = 'single'|'quad';
 export type CameraType = 'perspective'|'orthographic';
@@ -16,9 +16,26 @@ export type LogLevel = 'info'|'success'|'warning'|'error';
 
 export interface Vec3 { x: number; y: number; z: number; }
 
+export interface VoxelMaterial {
+  maxCompression: number;  // MPa - 最大壓縮力
+  maxTension: number;      // MPa - 最大拉伸力
+  density: number;         // kg/m³ - 密度
+  youngModulus: number;    // MPa - 楊氏模量
+}
+
+export const DEFAULT_MATERIALS: Record<string, VoxelMaterial> = {
+  concrete: { maxCompression: 30, maxTension: 3, density: 2400, youngModulus: 25000 },
+  steel:    { maxCompression: 250, maxTension: 400, density: 7850, youngModulus: 200000 },
+  wood:     { maxCompression: 5, maxTension: 8, density: 600, youngModulus: 12000 },
+  brick:    { maxCompression: 10, maxTension: 0.5, density: 1800, youngModulus: 15000 },
+};
+
 export interface Voxel {
   id: string; pos: Vec3; color: string; semanticTag?: SemanticTag;
   category?: SemanticCategory; layerId: string; materialId?: string;
+  material: VoxelMaterial;
+  isSupport: boolean;       // 是否為固定支撐點
+  externalLoad?: Vec3;      // 外部施加的力向量 (N)
 }
 
 export interface Layer {
@@ -40,9 +57,29 @@ export interface PipelineState {
   result?: NURBSSurface[];
 }
 
-export interface LoadAnalysis {
-  maxStress: number; minStress: number; safetyFactor: number;
-  weakPoints: Vec3[]; loadPaths: Vec3[][]; stressMap: Map<string, number>;
+// FEA 結果
+export interface FEAEdge {
+  nodeA: Vec3;
+  nodeB: Vec3;
+  stress: number;       // 應力值 (MPa)
+  stressRatio: number;  // 0=安全, 1=極限, >1=超載
+  isTension: boolean;   // true=拉伸, false=壓縮
+}
+
+export interface FEAResult {
+  edges: FEAEdge[];
+  displacements: Map<string, Vec3>;
+  dangerCount: number;    // stressRatio > 0.8 的邊數
+  maxStressRatio: number;
+  totalEdges: number;
+}
+
+export interface LoadAnalysisState {
+  gravity: Vec3;
+  gravityMagnitude: number;
+  result: FEAResult | null;
+  showStressOverlay: boolean;
+  isComputing: boolean;
 }
 
 export interface LogEntry { ts: number; level: LogLevel; source: string; message: string; }
@@ -53,8 +90,6 @@ export interface PBRMaterial {
 }
 
 export interface LODLevel { level: number; distance: number; triangleCount: number; enabled: boolean; }
-
-export interface AgentMessage { role: 'user'|'agent'; content: string; ts: number; }
 
 export interface CollabUser { id: string; name: string; color: string; cursor?: Vec3; online: boolean; }
 
@@ -74,6 +109,7 @@ export interface AppState {
   // View
   viewLayout: ViewLayout; viewMode: ViewMode; cameraType: CameraType;
   selectMode: SelectMode; showGrid: boolean; showAxes: boolean; showNormals: boolean;
+  fpMode: boolean; // 第一人稱模式
 
   // Voxels
   voxels: Voxel[]; selectedVoxelIds: string[];
@@ -84,8 +120,8 @@ export interface AppState {
   // Pipeline
   pipeline: PipelineState;
 
-  // Load Analysis
-  loadAnalysis: LoadAnalysis | null; showStressHeatmap: boolean;
+  // Load Analysis (FEA)
+  loadAnalysis: LoadAnalysisState;
 
   // Engines
   engines: EngineStatus[];
@@ -99,9 +135,6 @@ export interface AppState {
   // LOD
   lodLevels: LODLevel[]; currentLOD: number;
 
-  // Agent
-  agentMessages: AgentMessage[]; agentThinking: boolean;
-
   // Multiplayer
   collabUsers: CollabUser[]; isCollabActive: boolean;
 
@@ -110,6 +143,9 @@ export interface AppState {
 
   // Performance
   fps: number; memoryUsage: number; triangleCount: number; drawCalls: number;
+
+  // Active voxel material for new voxels
+  activeVoxelMaterial: string; // key into DEFAULT_MATERIALS
 
   // Actions
   setTool: (tool: ToolType) => void;
@@ -120,16 +156,20 @@ export interface AppState {
   toggleGrid: () => void;
   toggleAxes: () => void;
   toggleNormals: () => void;
+  setFpMode: (fp: boolean) => void;
   setBrushSize: (s: number) => void;
   setBrushStrength: (s: number) => void;
   setBrushShape: (s: 'sphere'|'cube'|'cylinder') => void;
   setPaintColor: (c: string) => void;
+  setActiveVoxelMaterial: (m: string) => void;
 
   addVoxel: (v: Voxel) => void;
   removeVoxel: (id: string) => void;
   selectVoxels: (ids: string[]) => void;
   clearSelection: () => void;
   updateVoxel: (id: string, patch: Partial<Voxel>) => void;
+  toggleVoxelSupport: (id: string) => void;
+  setVoxelExternalLoad: (id: string, load: Vec3 | undefined) => void;
 
   addLayer: (l: Layer) => void;
   removeLayer: (id: string) => void;
@@ -144,8 +184,12 @@ export interface AppState {
   setPipelineParams: (p: Partial<PipelineState['params']>) => void;
   resetPipeline: () => void;
 
-  setLoadAnalysis: (a: LoadAnalysis | null) => void;
-  toggleStressHeatmap: () => void;
+  // FEA
+  setFEAResult: (r: FEAResult | null) => void;
+  toggleStressOverlay: () => void;
+  setGravity: (dir: Vec3) => void;
+  setGravityMagnitude: (m: number) => void;
+  setFEAComputing: (c: boolean) => void;
 
   addLog: (level: LogLevel, source: string, message: string) => void;
   clearLogs: () => void;
@@ -156,9 +200,6 @@ export interface AppState {
 
   setLODLevels: (levels: LODLevel[]) => void;
   setCurrentLOD: (l: number) => void;
-
-  addAgentMessage: (msg: AgentMessage) => void;
-  setAgentThinking: (t: boolean) => void;
 
   setCollabUsers: (users: CollabUser[]) => void;
   setCollabActive: (a: boolean) => void;
@@ -178,7 +219,6 @@ const defaultEngines: EngineStatus[] = [
   { name: '語意引擎', running: true },
   { name: '負載引擎', running: true },
   { name: '圖層引擎', running: true },
-  { name: '代理人引擎', running: true },
   { name: '多人引擎', running: false },
   { name: '貼圖引擎', running: true },
   { name: 'LOD引擎', running: true },
@@ -205,6 +245,7 @@ export const useStore = create<AppState>()(
     brushShape: 'sphere', paintColor: '#638cff',
     viewLayout: 'single', viewMode: 'solid', cameraType: 'perspective',
     selectMode: 'object', showGrid: true, showAxes: true, showNormals: false,
+    fpMode: false,
     voxels: [], selectedVoxelIds: [],
     layers: defaultLayers, activeLayerId: 'default',
     pipeline: {
@@ -216,18 +257,24 @@ export const useStore = create<AppState>()(
       ],
       params: { qefThreshold: 0.01, pcaTolerance: 0.05, nurbsDegree: 3, controlPointCount: 16 },
     },
-    loadAnalysis: null, showStressHeatmap: false,
+    loadAnalysis: {
+      gravity: { x: 0, y: -1, z: 0 },
+      gravityMagnitude: 9.81,
+      result: null,
+      showStressOverlay: false,
+      isComputing: false,
+    },
     engines: defaultEngines,
     logs: [{ ts: Date.now(), level: 'info', source: 'System', message: 'FastDesign v1.0 已啟動' }],
     materials: defaultMaterials, activeMaterialId: 'default',
     lodLevels: defaultLOD, currentLOD: 0,
-    agentMessages: [], agentThinking: false,
     collabUsers: [], isCollabActive: false,
     semanticRules: [
       { id: 'r1', name: '結構完整性', condition: '應力 > 閾值', action: '標記弱點', enabled: true },
       { id: 'r2', name: '裝飾一致性', condition: '相鄰語意不同', action: '建議統一', enabled: true },
     ],
     fps: 60, memoryUsage: 0, triangleCount: 0, drawCalls: 0,
+    activeVoxelMaterial: 'concrete',
 
     setTool: (tool) => set((s) => { s.activeTool = tool; }),
     setViewLayout: (l) => set((s) => { s.viewLayout = l; }),
@@ -237,10 +284,12 @@ export const useStore = create<AppState>()(
     toggleGrid: () => set((s) => { s.showGrid = !s.showGrid; }),
     toggleAxes: () => set((s) => { s.showAxes = !s.showAxes; }),
     toggleNormals: () => set((s) => { s.showNormals = !s.showNormals; }),
+    setFpMode: (fp) => set((s) => { s.fpMode = fp; }),
     setBrushSize: (sz) => set((s) => { s.brushSize = sz; }),
     setBrushStrength: (st) => set((s) => { s.brushStrength = st; }),
     setBrushShape: (sh) => set((s) => { s.brushShape = sh; }),
     setPaintColor: (c) => set((s) => { s.paintColor = c; }),
+    setActiveVoxelMaterial: (m) => set((s) => { s.activeVoxelMaterial = m; }),
 
     addVoxel: (v) => set((s) => {
       s.voxels.push(v);
@@ -262,6 +311,14 @@ export const useStore = create<AppState>()(
     updateVoxel: (id, patch) => set((s) => {
       const v = s.voxels.find(v => v.id === id);
       if (v) Object.assign(v, patch);
+    }),
+    toggleVoxelSupport: (id) => set((s) => {
+      const v = s.voxels.find(v => v.id === id);
+      if (v) v.isSupport = !v.isSupport;
+    }),
+    setVoxelExternalLoad: (id, load) => set((s) => {
+      const v = s.voxels.find(v => v.id === id);
+      if (v) v.externalLoad = load;
     }),
 
     addLayer: (l) => set((s) => { s.layers.push(l); }),
@@ -317,8 +374,12 @@ export const useStore = create<AppState>()(
       s.pipeline.stages.forEach(st => { st.status = 'idle'; st.progress = 0; });
     }),
 
-    setLoadAnalysis: (a) => set((s) => { s.loadAnalysis = a as any; }),
-    toggleStressHeatmap: () => set((s) => { s.showStressHeatmap = !s.showStressHeatmap; }),
+    // FEA
+    setFEAResult: (r) => set((s) => { s.loadAnalysis.result = r as any; }),
+    toggleStressOverlay: () => set((s) => { s.loadAnalysis.showStressOverlay = !s.loadAnalysis.showStressOverlay; }),
+    setGravity: (dir) => set((s) => { s.loadAnalysis.gravity = dir; }),
+    setGravityMagnitude: (m) => set((s) => { s.loadAnalysis.gravityMagnitude = m; }),
+    setFEAComputing: (c) => set((s) => { s.loadAnalysis.isComputing = c; }),
 
     addLog: (level, source, message) => set((s) => {
       s.logs.push({ ts: Date.now(), level, source, message });
@@ -335,9 +396,6 @@ export const useStore = create<AppState>()(
 
     setLODLevels: (levels) => set((s) => { s.lodLevels = levels as any; }),
     setCurrentLOD: (l) => set((s) => { s.currentLOD = l; }),
-
-    addAgentMessage: (msg) => set((s) => { s.agentMessages.push(msg); }),
-    setAgentThinking: (t) => set((s) => { s.agentThinking = t; }),
 
     setCollabUsers: (users) => set((s) => { s.collabUsers = users as any; }),
     setCollabActive: (a) => set((s) => { s.isCollabActive = a; }),
