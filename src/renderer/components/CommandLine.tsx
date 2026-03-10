@@ -2,15 +2,12 @@
  * CommandLine - AutoCAD-style Command Line Interface
  * Uses Fuse.js for fuzzy search, bottom-fixed panel with history + suggestions
  * 
- * v1.7 fixes:
- * - Enter executes immediately if input exactly matches a command (case-insensitive)
- * - Suggestions only show when there are multiple partial matches
- * - Escape closes suggestions panel, second Escape clears input
+ * v1.8: Added Ctrl+R history search
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Fuse from 'fuse.js';
 import { commandEngine, CommandResult, CommandDef } from '../engines/CommandEngine';
-import { ChevronRight, Terminal, ChevronUp, ChevronDown } from 'lucide-react';
+import { ChevronRight, Terminal, ChevronUp, ChevronDown, Search } from 'lucide-react';
 
 /* ─── Fuse.js fuzzy search setup ─── */
 const allCommands = commandEngine.getAllCommands();
@@ -32,7 +29,7 @@ let lineIdCounter = 0;
 export function CommandLine() {
   const [input, setInput] = useState('');
   const [historyLines, setHistoryLines] = useState<HistoryLine[]>([
-    { id: lineIdCounter++, type: 'output', text: 'FastDesign v1.7 — 輸入 HELP 查看所有指令，`:` 或 `` ` `` 聚焦指令列', timestamp: Date.now() },
+    { id: lineIdCounter++, type: 'output', text: 'FastDesign v1.8 — 輸入 HELP 查看所有指令，`:` 或 `` ` `` 聚焦指令列', timestamp: Date.now() },
   ]);
   const [suggestions, setSuggestions] = useState<CommandDef[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
@@ -41,6 +38,13 @@ export function CommandLine() {
   const [cmdHistoryStack, setCmdHistoryStack] = useState<string[]>([]);
   const [cmdHistoryIdx, setCmdHistoryIdx] = useState(-1);
   const [showSuggestions, setShowSuggestions] = useState(true);
+
+  // History search state
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -66,6 +70,19 @@ export function CommandLine() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Update search results when query changes
+  useEffect(() => {
+    if (!searchMode || !searchQuery.trim()) {
+      setSearchResults(cmdHistoryStack);
+      setSearchSelectedIdx(0);
+      return;
+    }
+    const q = searchQuery.toLowerCase();
+    const filtered = cmdHistoryStack.filter(c => c.toLowerCase().includes(q));
+    setSearchResults(filtered);
+    setSearchSelectedIdx(0);
+  }, [searchQuery, searchMode, cmdHistoryStack]);
+
   // Update suggestions using Fuse.js as user types
   useEffect(() => {
     const trimmed = input.trim();
@@ -80,11 +97,9 @@ export function CommandLine() {
     const cmdPart = parts[0].toUpperCase();
 
     if (parts.length === 1) {
-      // Check for exact match first
       const exact = commandEngine.getCommandByName(cmdPart);
       if (exact) {
         setParamHint(exact.syntax);
-        // If exact match, don't show suggestions (user can just press Enter)
         if (exact.name.toUpperCase() === cmdPart) {
           setSuggestions([]);
           setSelectedSuggestion(-1);
@@ -92,7 +107,6 @@ export function CommandLine() {
         }
       }
 
-      // Fuzzy search via Fuse.js
       const results = fuse.search(cmdPart).slice(0, 8).map(r => r.item);
       if (showSuggestions) {
         setSuggestions(results);
@@ -123,8 +137,6 @@ export function CommandLine() {
     if (!cmd.trim()) return;
 
     addLine('input', cmd.trim());
-
-    // Add to command history stack
     setCmdHistoryStack(prev => [...prev.slice(-100), cmd.trim()]);
     setCmdHistoryIdx(-1);
 
@@ -143,37 +155,40 @@ export function CommandLine() {
   }, [addLine]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Ctrl+R: toggle history search
+    if (e.ctrlKey && e.key === 'r') {
+      e.preventDefault();
+      setSearchMode(true);
+      setSearchQuery('');
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+      return;
+    }
+
     switch (e.key) {
       case 'Enter': {
         e.preventDefault();
         const trimmed = input.trim();
         if (!trimmed) return;
 
-        // If input has args (spaces), always execute directly
         if (trimmed.includes(' ')) {
           executeCommand(input);
           return;
         }
 
-        // Check if input exactly matches a command name (case-insensitive)
         const exactCmd = commandEngine.getCommandByName(trimmed.toUpperCase());
         if (exactCmd) {
-          // Exact match → execute immediately, no autocomplete needed
           executeCommand(trimmed);
           return;
         }
 
-        // If suggestions are showing and one is selected, fill it in
         if (suggestions.length > 0 && selectedSuggestion >= 0 && suggestions[selectedSuggestion]) {
           const cmd = suggestions[selectedSuggestion];
-          // If the selected suggestion needs args, fill it; otherwise execute
           setInput(cmd.name + ' ');
           setSuggestions([]);
           setSelectedSuggestion(-1);
           return;
         }
 
-        // No exact match, no suggestion selected → try to execute anyway
         executeCommand(input);
         break;
       }
@@ -221,22 +236,45 @@ export function CommandLine() {
       case 'Escape':
         e.preventDefault();
         if (suggestions.length > 0) {
-          // First Escape: close suggestions
           setSuggestions([]);
           setSelectedSuggestion(-1);
           setShowSuggestions(false);
         } else if (input.trim()) {
-          // Second Escape: clear input
           setInput('');
           setShowSuggestions(true);
         } else {
-          // Third Escape: blur
           inputRef.current?.blur();
           setShowSuggestions(true);
         }
         break;
     }
   }, [input, suggestions, selectedSuggestion, executeCommand, cmdHistoryStack, cmdHistoryIdx, showSuggestions]);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'Enter':
+        e.preventDefault();
+        if (searchResults.length > 0 && searchResults[searchSelectedIdx]) {
+          setInput(searchResults[searchSelectedIdx]);
+          setSearchMode(false);
+          inputRef.current?.focus();
+        }
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSearchSelectedIdx(prev => Math.max(0, prev - 1));
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        setSearchSelectedIdx(prev => Math.min(searchResults.length - 1, prev + 1));
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setSearchMode(false);
+        inputRef.current?.focus();
+        break;
+    }
+  }, [searchResults, searchSelectedIdx]);
 
   // Re-enable suggestions when input changes
   useEffect(() => {
@@ -254,7 +292,6 @@ export function CommandLine() {
     if (type === 'input') return '›';
     if (type === 'error') return '✗';
     if (type === 'success') return '✓';
-    if (type === 'output') return '·';
     return '·';
   };
 
@@ -274,7 +311,7 @@ export function CommandLine() {
         <span>指令列</span>
         {isExpanded ? <ChevronDown size={12} style={{ marginLeft: 'auto' }} /> : <ChevronUp size={12} style={{ marginLeft: 'auto' }} />}
         <span style={{ fontSize: 9, color: 'var(--text-secondary)', marginLeft: 8 }}>
-          ` 或 : 聚焦
+          ` 或 : 聚焦 | Ctrl+R 搜尋歷史
         </span>
       </div>
 
@@ -290,8 +327,49 @@ export function CommandLine() {
             ))}
           </div>
 
+          {/* History search overlay */}
+          {searchMode && (
+            <div className="cmd-search-overlay">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderBottom: '1px solid var(--border)' }}>
+                <Search size={11} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className="cmd-search-input"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="搜尋歷史指令..."
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </div>
+              <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+                {searchResults.length === 0 && (
+                  <div style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: 10, textAlign: 'center' }}>
+                    沒有匹配的歷史指令
+                  </div>
+                )}
+                {searchResults.map((cmd, i) => (
+                  <div
+                    key={i}
+                    className={`cmd-search-item ${i === searchSelectedIdx ? 'selected' : ''}`}
+                    onClick={() => {
+                      setInput(cmd);
+                      setSearchMode(false);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    <ChevronRight size={10} style={{ flexShrink: 0, opacity: 0.4 }} />
+                    <span>{cmd}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Suggestions dropdown (above input) */}
-          {suggestions.length > 0 && (
+          {suggestions.length > 0 && !searchMode && (
             <div className="command-line-suggestions">
               {suggestions.map((cmd, i) => (
                 <div

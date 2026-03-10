@@ -1,6 +1,6 @@
 import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Grid, GizmoHelper, GizmoViewcube, Line, PerspectiveCamera, OrthographicCamera, ContactShadows, Html } from '@react-three/drei';
+import { OrbitControls, Grid, GizmoHelper, GizmoViewcube, Line, PerspectiveCamera, OrthographicCamera, ContactShadows, Html, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { useStore, Voxel, DEFAULT_MATERIALS } from '../../store/useStore';
 import { voxelEngine } from '../../engines/VoxelEngine';
@@ -787,6 +787,8 @@ function ClickHandler() {
 /* ============================================================
    Complete Lighting System
    ============================================================ */
+const ENV_PRESETS = ['city', 'sunset', 'dawn', 'night', 'warehouse', 'apartment', 'studio', 'forest', 'park', 'lobby'] as const;
+
 function LightingSystem() {
   const viewMode = useStore(s => s.viewMode);
 
@@ -796,10 +798,10 @@ function LightingSystem() {
 
   return (
     <group>
-      <ambientLight intensity={0.6} color="#ffffff" />
+      <ambientLight intensity={0.4} color="#ffffff" />
       <directionalLight
         position={[50, 100, 50]}
-        intensity={1.2}
+        intensity={1.0}
         color="#fff5e0"
         castShadow
         shadow-mapSize-width={2048}
@@ -811,8 +813,9 @@ function LightingSystem() {
         shadow-camera-top={100}
         shadow-camera-bottom={-100}
       />
-      <directionalLight position={[-50, 20, -50]} intensity={0.4} color="#8ab4f8" />
-      <hemisphereLight args={['#87ceeb', '#8b7355', 0.3]} />
+      <directionalLight position={[-50, 20, -50]} intensity={0.3} color="#8ab4f8" />
+      <hemisphereLight args={['#87ceeb', '#8b7355', 0.2]} />
+      <Environment preset="city" background={false} />
       <ContactShadows
         position={[0, -0.49, 0]}
         opacity={0.35}

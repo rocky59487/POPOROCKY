@@ -634,3 +634,85 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   border-radius: 2px;
   transition: width 0.3s;
 }
+
+/* ─── Floating Toolbar (Blender-style T panel) ─── */
+.floating-toolbar {
+  position: absolute; left: 8px; top: 50%; transform: translateY(-50%); z-index: 20;
+  display: flex; flex-direction: column; gap: 2px; padding: 4px;
+  background: rgba(14,14,22,0.9); backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glass); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+.ft-btn {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  color: var(--text-secondary); cursor: pointer; transition: all var(--transition-fast);
+  padding: 0; font-size: 0;
+}
+.ft-btn:hover { background: var(--bg-button-hover); color: var(--text-primary); }
+.ft-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.ft-divider { height: 1px; margin: 3px 2px; background: var(--border); }
+.ft-dot {
+  width: 12px; height: 12px; border-radius: 50%; border: 2px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+.ft-mat.active .ft-dot { border-color: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+
+/* ─── Performance Panel ─── */
+.perf-panel {
+  position: absolute; top: 36px; right: 8px; z-index: 20; min-width: 140px;
+  background: rgba(14,14,22,0.9); backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glass); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md); font-size: var(--font-xs);
+}
+.perf-header {
+  display: flex; align-items: center; gap: 4px; padding: 5px 8px; cursor: pointer;
+  color: var(--text-secondary); font-weight: 600; letter-spacing: 0.3px;
+  border-bottom: 1px solid var(--border);
+}
+.perf-header:hover { color: var(--text-primary); }
+.perf-body { padding: 4px 8px; }
+.perf-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2px 0; color: var(--text-muted);
+}
+.perf-row span:last-child { color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; }
+
+/* ─── UI Consistency: Tooltips ─── */
+[title] { position: relative; }
+.btn-icon[title]:hover::after, .ft-btn[title]:hover::after {
+  content: attr(title); position: absolute; left: 110%; top: 50%; transform: translateY(-50%);
+  padding: 3px 8px; background: #1c2030; color: var(--text-primary);
+  font-size: 10px; border-radius: 4px; white-space: nowrap; z-index: 100;
+  border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm);
+  pointer-events: none; font-weight: 500;
+}
+
+/* ─── UI Consistency: Focus states ─── */
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 2px rgba(99,140,255,0.15) !important;
+}
+
+/* ─── UI Consistency: Button hover ─── */
+.btn:hover, .btn-icon:hover { background: #21262d; }
+.btn.active:hover, .btn-icon.active:hover { background: rgba(99,140,255,0.2); }
+
+/* ─── Command history search overlay ─── */
+.cmd-search-overlay {
+  position: absolute; bottom: 100%; left: 0; right: 0; z-index: 50;
+  background: rgba(14,14,22,0.95); backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glass); border-radius: var(--radius-md) var(--radius-md) 0 0;
+  box-shadow: var(--shadow-lg); max-height: 200px; overflow-y: auto;
+}
+.cmd-search-input {
+  width: 100%; padding: 6px 10px; background: var(--bg-input);
+  border: none; border-bottom: 1px solid var(--border);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: var(--font-sm);
+}
+.cmd-search-item {
+  padding: 4px 10px; cursor: pointer; font-family: var(--font-mono);
+  font-size: var(--font-xs); color: var(--text-secondary);
+}
+.cmd-search-item:hover { background: var(--bg-button-hover); color: var(--text-primary); }
+.cmd-search-item.selected { background: var(--accent-dim); color: var(--accent); }

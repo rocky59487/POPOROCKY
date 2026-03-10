@@ -9,6 +9,7 @@ import { useStore, Voxel, Vec3 } from '../store/useStore';
 import { voxelEngine } from './VoxelEngine';
 import { loadEngine, MATERIAL_PRESETS } from './LoadEngine';
 import eventBus from './EventBus';
+import { ReportGenerator } from './ReportGenerator';
 
 /* ─── Command Definition ─── */
 export interface CommandDef {
@@ -377,16 +378,25 @@ class CommandEngine {
     });
 
     this.reg({
-      name: 'REPORT', aliases: [], syntax: 'REPORT',
-      description: '生成結構分析報告',
+      name: 'REPORT', aliases: [], syntax: 'REPORT [html]',
+      description: '生成結構分析報告（加 html 參數可下載 HTML 報告）',
       category: 'analysis',
-      execute: () => {
+      execute: (args) => {
         const s = store();
+        if (args[0]?.toLowerCase() === 'html') {
+          try {
+            ReportGenerator.downloadReport();
+            s.addLog('success', 'Report', 'HTML 結構報告已下載');
+            return { success: true, message: 'HTML 結構報告已下載' };
+          } catch (err) {
+            return { success: false, message: '報告生成失敗: ' + String(err) };
+          }
+        }
         if (!s.loadAnalysis.result) return { success: false, message: '請先執行 ANALYZE' };
         const report = loadEngine.generateReport(s.voxels, s.loadAnalysis.result);
         const reportText = loadEngine.formatReportText(report);
         s.addLog('info', 'Report', reportText);
-        return { success: true, message: '結構報告已生成（查看控制台）' };
+        return { success: true, message: '結構報告已生成（查看控制台）。輸入 REPORT html 可下載 HTML 版本' };
       },
     });
 

@@ -147,7 +147,7 @@ export default function App() {
 
   // ─── Init + Demo voxels + Auto-save ───
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.7 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v1.8 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
     addLog('info', 'System', 'FEA 負載引擎 (桁架分析 + CG 求解器 + 材質預設庫) 就緒');

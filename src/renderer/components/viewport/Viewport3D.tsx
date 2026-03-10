@@ -2,6 +2,8 @@ import React from 'react';
 import { useStore } from '../../store/useStore';
 import { ViewportScene } from './ViewportScene';
 import { MiniMap } from './MiniMap';
+import { FloatingToolbar } from './FloatingToolbar';
+import { PerfPanel } from './PerfPanel';
 import { Maximize2, Grid3X3 } from 'lucide-react';
 
 const quadViews = [
@@ -24,7 +26,7 @@ export function Viewport3D() {
 
   const modeLabel = viewMode === 'wireframe' ? '線框' : viewMode === 'solid' ? '實體' : '渲染';
   const camLabel = cameraType === 'perspective' ? '透視' : '正交';
-  const renderMode = voxelCount > 1000 ? 'Instanced' : 'Standard';
+  const renderMode = voxelCount > 100 ? 'Instanced' : 'Standard';
 
   if (layout === 'quad') {
     return (
@@ -50,7 +52,7 @@ export function Viewport3D() {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span className="viewport-badge">{camLabel} | {modeLabel}</span>
           <span className="viewport-badge">體素: {voxelCount}</span>
-          <span className="viewport-badge" style={{ color: voxelCount > 1000 ? '#a78bfa' : 'var(--text-muted)' }}>
+          <span className="viewport-badge" style={{ color: voxelCount > 100 ? '#a78bfa' : 'var(--text-muted)' }}>
             {renderMode}
           </span>
           {selectedCount > 0 && <span className="viewport-badge" style={{ color: '#f5a623' }}>選取: {selectedCount}</span>}
@@ -63,6 +65,13 @@ export function Viewport3D() {
           <Grid3X3 size={12} />
         </button>
       </div>
+
+      {/* Floating Toolbar - left side */}
+      <FloatingToolbar />
+
+      {/* Performance Panel - top right */}
+      <PerfPanel />
+
       <ViewportScene />
       <MiniMap />
     </div>
