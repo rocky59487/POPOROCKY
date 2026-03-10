@@ -17,10 +17,14 @@ import { runVoxelToNURBS } from './pipeline/VoxelToNURBS';
 import { voxelEngine } from './engines/VoxelEngine';
 import { loadEngine, MATERIAL_PRESETS } from './engines/LoadEngine';
 import { projectManager } from './engines/ProjectManager';
+import { OBJExporter } from './engines/OBJExporter';
 import { glueEngine } from './engines/GlueEngine';
 import eventBus from './engines/EventBus';
 import { Layers, Image, BarChart3 } from 'lucide-react';
 import { SceneStatsPanel } from './components/panels/SceneStatsPanel';
+import { BrushSettingsPanel } from './components/panels/BrushSettingsPanel';
+import { TemplateLibrary } from './components/panels/TemplateLibrary';
+import { AnalysisTimeline } from './components/panels/AnalysisTimeline';
 import { ContextMenu } from './components/ContextMenu';
 
 type RightTab = 'layers' | 'texture' | 'load';
@@ -55,10 +59,48 @@ export default function App() {
           case 'open-project': projectManager.openProject(); break;
           case 'save-project': projectManager.downloadProject(); break;
           case 'screenshot': projectManager.takeScreenshot(); break;
+          case 'export-obj': OBJExporter.downloadOBJ(); break;
         }
       });
     }
   }, []);
+
+  // ─── Export Event Handlers ───
+  useEffect(() => {
+    const onExport = (data: { format: string; filename: string }) => {
+      switch (data.format) {
+        case 'OBJ':
+          OBJExporter.downloadOBJ();
+          break;
+        case 'MTL':
+          OBJExporter.downloadMTL();
+          break;
+        case 'JSON':
+          projectManager.downloadProject();
+          break;
+        default:
+          addLog('warning', 'Export', `不支援的格式: ${data.format}`);
+      }
+    };
+
+    const onSave = () => {
+      projectManager.downloadProject();
+    };
+
+    const onLoad = () => {
+      projectManager.openProject();
+    };
+
+    eventBus.on('export:request', onExport);
+    eventBus.on('project:save', onSave);
+    eventBus.on('project:load', onLoad);
+
+    return () => {
+      eventBus.off('export:request', onExport);
+      eventBus.off('project:save', onSave);
+      eventBus.off('project:load', onLoad);
+    };
+  }, [addLog]);
 
   // ─── Glue Joint Event Handlers ───
   useEffect(() => {
@@ -103,14 +145,15 @@ export default function App() {
 
   // ─── Init + Demo voxels + Auto-save ───
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.5 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v1.6 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
     addLog('info', 'System', 'FEA 負載引擎 (桁架分析 + CG 求解器 + 材質預設庫) 就緒');
     addLog('info', 'System', '體素引擎 (Octree + Undo/Redo + 三種刷形狀) 就緒');
     addLog('info', 'System', 'Glue Joint 黏合系統就緒');
     addLog('info', 'System', '專案管理器就緒（自動儲存每 5 分鐘）');
-    addLog('info', 'System', '對話框系統就緒（關於/快捷鍵/管線/LOD）');
+    addLog('info', 'System', 'OBJ 匯出引擎就緒');
+    addLog('info', 'System', '模板庫就緒（8 個預設模板）');
 
     projectManager.startAutoSave();
 
@@ -213,8 +256,8 @@ export default function App() {
 
       if (e.ctrlKey || e.metaKey) {
         switch (e.key.toLowerCase()) {
-          case 'z': e.preventDefault(); voxelEngine.undo(); return;
-          case 'y': e.preventDefault(); voxelEngine.redo(); return;
+          case 'z': e.preventDefault(); voxelEngine.undo(); s.addLog('info', 'Edit', '復原'); return;
+          case 'y': e.preventDefault(); voxelEngine.redo(); s.addLog('info', 'Edit', '重做'); return;
           case 's':
             e.preventDefault();
             if (e.shiftKey) {
@@ -225,19 +268,20 @@ export default function App() {
             return;
           case 'o': e.preventDefault(); projectManager.openProject(); return;
           case 'n': e.preventDefault(); projectManager.newProject(); return;
+          case 'a':
+            e.preventDefault();
+            s.selectVoxels(s.voxels.map(v => v.id));
+            s.addLog('info', 'Edit', `已全選 ${s.voxels.length} 個體素`);
+            return;
+          case 'e':
+            e.preventDefault();
+            OBJExporter.downloadOBJ();
+            return;
         }
         return;
       }
 
       if (s.fpMode && e.key !== 'Escape') return;
-
-      // Ctrl+A: select all
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        s.selectVoxels(s.voxels.map(v => v.id));
-        s.addLog('info', 'Edit', `已全選 ${s.voxels.length} 個體素`);
-        return;
-      }
 
       switch (e.key) {
         case 'Escape':
@@ -268,20 +312,31 @@ export default function App() {
       }
 
       switch (e.key.toLowerCase()) {
-        case 'v': s.setTool('select'); break;
-        case 'b': e.shiftKey ? s.setTool('brush') : s.setTool('place'); break;
+        case 'q': s.setTool('select'); break;
+        case 'w': s.setTool('place'); break;
         case 'e': s.setTool('erase'); break;
-        case 'p': s.setTool('paint'); break;
-        case 'm': s.setTool('measure'); break;
         case 'g': if (!e.ctrlKey) s.setTool('glue'); break;
+        case 'm': s.setTool('measure'); break;
+        case 'b': e.shiftKey ? s.setTool('brush') : s.setTool('place'); break;
+        case 'p': s.setTool('paint'); break;
         case 'x': s.toggleAxes(); break;
+        case 'f':
+          if (!e.shiftKey) {
+            // Focus on selected voxels
+            if (s.selectedVoxelIds.length > 0) {
+              eventBus.emit('camera:focus', { ids: s.selectedVoxelIds });
+              s.addLog('info', 'View', '聚焦到選取物件');
+            }
+          } else {
+            s.setTool('fill');
+          }
+          break;
         case '1': s.setTool('tag-sharp'); break;
         case '2': s.setTool('tag-smooth'); break;
         case '3': s.setTool('tag-fillet'); break;
         case '5': s.setViewMode('wireframe'); break;
         case '6': s.setViewMode('solid'); break;
         case '7': s.setViewMode('rendered'); break;
-        case 'f': if (e.shiftKey) s.setTool('fill'); break;
       }
     };
     window.addEventListener('keydown', handler);
@@ -299,7 +354,9 @@ export default function App() {
       <div className="app-main">
         <div className="app-sidebar left">
           <PropertiesPanel />
+          <BrushSettingsPanel />
           <SceneStatsPanel />
+          <TemplateLibrary />
         </div>
         <div className="app-center">
           <div className="app-viewport">
@@ -319,6 +376,7 @@ export default function App() {
             {rightTab === 'texture' && <TexturePanel />}
             {rightTab === 'load' && <LoadAnalysisPanel />}
           </div>
+          <AnalysisTimeline />
         </div>
       </div>
       <StatusBar />

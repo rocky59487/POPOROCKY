@@ -129,7 +129,7 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14p
 /* Layout */
 .app-main { display: flex; flex: 1; overflow: hidden; gap: 2px; padding: 2px; }
 .app-sidebar { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
-.app-sidebar.left { width: 260px; min-width: 200px; flex-shrink: 0; }
+.app-sidebar.left { width: 260px; min-width: 200px; flex-shrink: 0; overflow-y: auto; max-height: 100%; }
 .app-sidebar.right { width: 280px; min-width: 220px; flex-shrink: 0; display: flex; flex-direction: row; }
 .sidebar-tabs { display: flex; flex-direction: column; gap: 2px; padding: 2px; background: var(--bg-surface); border-right: 1px solid var(--border); }
 .sidebar-tab { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: var(--radius-sm); transition: all var(--transition-fast); }

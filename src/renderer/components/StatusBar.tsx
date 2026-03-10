@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
-import { Activity, Cpu, Triangle, Box, MousePointer2, Layers, Link2, Save } from 'lucide-react';
+import { Activity, Cpu, Triangle, Box, MousePointer2, Layers, Link2, Save, Zap } from 'lucide-react';
 
 const toolNames: Record<string, string> = {
   select: '選取', place: '放置', erase: '刪除', paint: '上色',
@@ -27,6 +27,7 @@ export function StatusBar() {
   const isDirty = useStore(s => s.isDirty);
   const projectName = useStore(s => s.projectName);
   const rc = engines.filter(e => e.running).length;
+  const renderMode = vc > 1000 ? 'Instanced' : 'Standard';
 
   return (
     <div className="app-status-bar">
@@ -36,6 +37,10 @@ export function StatusBar() {
         <span className="status-item"><Box size={10} /> 體素: {vc}</span>
         <span className="status-divider">|</span>
         <span className="status-item"><Triangle size={10} /> 三角面: {tris}</span>
+        <span className="status-divider">|</span>
+        <span className="status-item" style={{ color: vc > 1000 ? '#a78bfa' : 'var(--text-muted)' }}>
+          <Zap size={10} /> {renderMode}
+        </span>
         {glueCount > 0 && <>
           <span className="status-divider">|</span>
           <span className="status-item"><Link2 size={10} /> 黏合: {glueCount}</span>
@@ -53,7 +58,12 @@ export function StatusBar() {
         {pl.status === 'running' && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--accent)' }}>管線: {pl.progress.toFixed(0)}%</span></>}
         {pl.status === 'done' && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--success)' }}>NURBS 已生成</span></>}
         {loadAnalysis.isComputing && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--warning)' }}>FEA 計算中...</span></>}
-        {loadAnalysis.result && !loadAnalysis.isComputing && <><span className="status-divider">|</span><span className="status-item" style={{ color: loadAnalysis.result.dangerCount > 0 ? 'var(--error)' : 'var(--success)' }}>FEA: {loadAnalysis.result.dangerCount} 危險邊</span></>}
+        {loadAnalysis.result && !loadAnalysis.isComputing && <>
+          <span className="status-divider">|</span>
+          <span className="status-item" style={{ color: loadAnalysis.result.dangerCount > 0 ? 'var(--error)' : 'var(--success)' }}>
+            分析完成：{loadAnalysis.result.dangerCount} 條危險邊，最大應力比 {loadAnalysis.result.maxStressRatio.toFixed(3)}
+          </span>
+        </>}
       </div>
       <div className="status-section">
         <span className="status-item">
@@ -64,7 +74,7 @@ export function StatusBar() {
         <span className="status-divider">|</span>
         <span className="status-item"><Cpu size={10} /> {mem} MB</span>
         <span className="status-divider">|</span>
-        <span className="status-item">FastDesign v1.4</span>
+        <span className="status-item">FastDesign v1.6</span>
       </div>
     </div>
   );

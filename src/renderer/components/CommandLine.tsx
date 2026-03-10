@@ -123,11 +123,21 @@ export function CommandLine() {
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
-        if (selectedSuggestion >= 0 && suggestions[selectedSuggestion]) {
+        // If input has args (spaces), execute directly
+        if (input.trim().includes(' ')) {
+          executeCommand(input);
+        } else if (selectedSuggestion >= 0 && suggestions[selectedSuggestion]) {
+          // Check if input exactly matches the selected suggestion
           const cmd = suggestions[selectedSuggestion];
-          setInput(cmd.name + ' ');
-          setSuggestions([]);
-          setSelectedSuggestion(-1);
+          if (cmd.name.toUpperCase() === input.trim().toUpperCase()) {
+            // Exact match - execute immediately
+            executeCommand(input);
+          } else {
+            // Partial match - fill in the suggestion
+            setInput(cmd.name + ' ');
+            setSuggestions([]);
+            setSelectedSuggestion(-1);
+          }
         } else {
           executeCommand(input);
         }
@@ -194,7 +204,16 @@ export function CommandLine() {
     if (type === 'input') return '›';
     if (type === 'error') return '✗';
     if (type === 'success') return '✓';
+    if (type === 'output') return '·';
     return '·';
+  };
+
+  const lineColor = (type: string) => {
+    if (type === 'input') return '#e6edf3';
+    if (type === 'error') return '#f85149';
+    if (type === 'success') return '#3fb950';
+    if (type === 'output') return '#58a6ff';
+    return '#8b949e';
   };
 
   return (
@@ -214,7 +233,7 @@ export function CommandLine() {
           {/* History area */}
           <div className="command-line-history" ref={historyRef}>
             {historyLines.map(line => (
-              <div key={line.id} className={`cmd-line cmd-${line.type}`}>
+              <div key={line.id} className={`cmd-line cmd-${line.type}`} style={{ color: lineColor(line.type) }}>
                 <span className="cmd-line-icon">{lineIcon(line.type)}</span>
                 <span className="cmd-line-text">{line.text}</span>
               </div>
