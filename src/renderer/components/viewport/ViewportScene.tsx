@@ -18,6 +18,13 @@ const MATERIAL_COLORS: Record<string, { color: string; roughness: number; metaln
   glass:    { color: '#88ccee', roughness: 0.1, metalness: 0.1 },
 };
 
+/* ─── Ortho camera direction configs ─── */
+const ORTHO_CONFIGS: Record<string, { position: [number, number, number]; up: [number, number, number] }> = {
+  top:   { position: [0, 80, 0],  up: [0, 0, -1] },
+  front: { position: [0, 0, 80],  up: [0, 1, 0] },
+  right: { position: [80, 0, 0],  up: [0, 1, 0] },
+};
+
 /* ============================================================
    Voxel Rendering (InstancedMesh) with Material Colors
    ============================================================ */
@@ -111,7 +118,6 @@ function SelectionOutline() {
     [voxels, selectedIds]
   );
 
-  // Animated pulse
   const groupRef = useRef<THREE.Group>(null);
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
@@ -148,7 +154,6 @@ function BoxSelection() {
   const { camera, gl, size } = useThree();
   const [isDragging, setIsDragging] = useState(false);
   const startPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const boxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (tool !== 'select') return;
@@ -164,23 +169,19 @@ function BoxSelection() {
       if (e.buttons !== 1) return;
       const dx = Math.abs(e.clientX - startPos.current.x);
       const dy = Math.abs(e.clientY - startPos.current.y);
-      if (dx > 5 || dy > 5) {
-        setIsDragging(true);
-      }
+      if (dx > 5 || dy > 5) setIsDragging(true);
     };
 
     const onMouseUp = (e: MouseEvent) => {
       if (!isDragging) return;
       setIsDragging(false);
 
-      // Calculate selection box in NDC
       const rect = canvas.getBoundingClientRect();
       const x1 = ((Math.min(startPos.current.x, e.clientX) - rect.left) / rect.width) * 2 - 1;
       const y1 = -((Math.min(startPos.current.y, e.clientY) - rect.top) / rect.height) * 2 + 1;
       const x2 = ((Math.max(startPos.current.x, e.clientX) - rect.left) / rect.width) * 2 - 1;
       const y2 = -((Math.max(startPos.current.y, e.clientY) - rect.top) / rect.height) * 2 + 1;
 
-      // Project each voxel to screen and check if inside box
       const selected: string[] = e.shiftKey ? [...selectedVoxelIds] : [];
       const vec = new THREE.Vector3();
 
@@ -280,6 +281,71 @@ function StressOverlay() {
 }
 
 /* ============================================================
+   Force Arrow Visualization (arrows showing load direction)
+   ============================================================ */
+function ForceArrows() {
+  const voxels = useStore(s => s.voxels);
+  const showOverlay = useStore(s => s.loadAnalysis.showStressOverlay);
+
+  const loadedVoxels = useMemo(() => {
+    if (!showOverlay) return [];
+    return voxels.filter(v => v.externalLoad && (v.externalLoad.x !== 0 || v.externalLoad.y !== 0 || v.externalLoad.z !== 0));
+  }, [voxels, showOverlay]);
+
+  const supportVoxels = useMemo(() => {
+    if (!showOverlay) return [];
+    return voxels.filter(v => v.isSupport);
+  }, [voxels, showOverlay]);
+
+  if (!showOverlay) return null;
+
+  return (
+    <group>
+      {/* Force arrows on loaded voxels */}
+      {loadedVoxels.map(v => {
+        const load = v.externalLoad!;
+        const mag = Math.sqrt(load.x * load.x + load.y * load.y + load.z * load.z);
+        const dir = new THREE.Vector3(load.x, load.y, load.z).normalize();
+        const arrowLen = Math.min(2.0, Math.max(0.5, mag / 50000));
+        const origin = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z);
+        const end = origin.clone().add(dir.clone().multiplyScalar(arrowLen));
+        const headStart = origin.clone().add(dir.clone().multiplyScalar(arrowLen * 0.7));
+
+        return (
+          <group key={`fa_${v.id}`}>
+            <Line points={[origin.toArray(), end.toArray()]} color="#ff4081" lineWidth={3} />
+            {/* Arrow head - 3 lines forming a cone */}
+            <mesh position={end.toArray()}>
+              <coneGeometry args={[0.12, 0.3, 6]} />
+              <meshBasicMaterial color="#ff4081" />
+            </mesh>
+            <Html position={[end.x, end.y + 0.3, end.z]} center style={{ pointerEvents: 'none' }}>
+              <div style={{
+                fontSize: 8, color: '#ff4081', background: 'rgba(0,0,0,0.8)', padding: '1px 4px',
+                borderRadius: 3, whiteSpace: 'nowrap', fontFamily: 'monospace',
+              }}>
+                {(mag / 1000).toFixed(1)} kN
+              </div>
+            </Html>
+          </group>
+        );
+      })}
+      {/* Support markers (triangles) */}
+      {supportVoxels.map(v => (
+        <group key={`sp_${v.id}`}>
+          <mesh position={[v.pos.x, v.pos.y - 0.7, v.pos.z]} rotation={[Math.PI, 0, 0]}>
+            <coneGeometry args={[0.3, 0.4, 3]} />
+            <meshBasicMaterial color="#00e5ff" transparent opacity={0.8} />
+          </mesh>
+          {/* Ground lines */}
+          <Line points={[[v.pos.x - 0.4, v.pos.y - 0.9, v.pos.z], [v.pos.x + 0.4, v.pos.y - 0.9, v.pos.z]]} color="#00e5ff" lineWidth={2} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/* ============================================================
    Glue Joint Visualization (gold discs + dashed lines)
    ============================================================ */
 function GlueJointViz() {
@@ -308,7 +374,6 @@ function GlueJointViz() {
     return () => { eventBus.off('glue:add', onAdd); eventBus.off('glue:remove', onRemove); eventBus.off('glue:clear', onClear); };
   }, []);
 
-  // Animated glow for joints
   const groupRef = useRef<THREE.Group>(null);
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
@@ -326,20 +391,16 @@ function GlueJointViz() {
     <group ref={groupRef}>
       {joints.map((j, i) => {
         const mid = j.a.clone().add(j.b).multiplyScalar(0.5);
-        const dir = j.b.clone().sub(j.a).normalize();
         const color = j.type === 'rigid' ? '#ffd700' : j.type === 'hinge' ? '#ff8c00' : '#87ceeb';
         const discSize = 0.1 + j.strength * 0.15;
 
         return (
           <group key={`glue_${i}`}>
-            {/* Dashed connection line */}
             <Line points={[j.a.toArray(), j.b.toArray()]} color={color} lineWidth={3} dashed dashSize={0.1} gapSize={0.05} />
-            {/* Gold disc at midpoint */}
             <mesh position={mid}>
               <sphereGeometry args={[discSize, 12, 12]} />
               <meshBasicMaterial color={color} transparent opacity={0.7} />
             </mesh>
-            {/* Type label */}
             <Html position={[mid.x, mid.y + 0.3, mid.z]} center style={{ pointerEvents: 'none' }}>
               <div style={{
                 fontSize: 8, color, background: 'rgba(0,0,0,0.7)', padding: '1px 4px',
@@ -382,7 +443,6 @@ function MeasurementViz() {
     return () => { eventBus.off('measure:point', handler); };
   }, [tool]);
 
-  // Clear measurements event
   useEffect(() => {
     const onClear = () => { setMeasurements([]); setPoints([]); };
     eventBus.on('measure:clear', onClear);
@@ -402,10 +462,8 @@ function MeasurementViz() {
         return (
           <group key={`meas_${i}`}>
             <Line points={[m.points[0].toArray(), m.points[1].toArray()]} color="#ffffff" lineWidth={2} dashed dashSize={0.15} gapSize={0.08} />
-            {/* Endpoint markers */}
             <mesh position={m.points[0]}><sphereGeometry args={[0.06, 8, 8]} /><meshBasicMaterial color="#ffffff" /></mesh>
             <mesh position={m.points[1]}><sphereGeometry args={[0.06, 8, 8]} /><meshBasicMaterial color="#ffffff" /></mesh>
-            {/* Distance label */}
             <Html position={[mid.x, mid.y + 0.4, mid.z]} center style={{ pointerEvents: 'none' }}>
               <div style={{
                 background: 'rgba(255,255,255,0.95)', color: '#000', padding: '2px 8px',
@@ -621,7 +679,6 @@ function ClickHandler() {
   const voxels = useStore(s => s.voxels);
   const addLog = useStore(s => s.addLog);
 
-  // Glue tool state
   const glueFirstVoxel = useRef<{ x: number; y: number; z: number } | null>(null);
 
   const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
@@ -701,7 +758,7 @@ function ClickHandler() {
     }
   }, [tool, color, layerId, bSize, bShape, activeVoxelMaterial, addVoxel, removeVoxel, addLog, voxels, toggleVoxelSupport, setVoxelExternalLoad, selectVoxels, updateVoxel, selectedVoxelIds]);
 
-  // Right-click to change material
+  // Right-click emits context menu event
   const handleContextMenu = useCallback((e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (!e.point) return;
@@ -710,18 +767,13 @@ function ClickHandler() {
       Math.abs(v.pos.x - pos.x) < 0.6 && Math.abs(v.pos.y - pos.y) < 0.6 && Math.abs(v.pos.z - pos.z) < 0.6
     );
     if (clickedVoxel) {
-      const preset = loadEngine.getMaterialPreset(activeVoxelMaterial);
-      const matColor = MATERIAL_COLORS[activeVoxelMaterial];
-      if (preset) {
-        updateVoxel(clickedVoxel.id, {
-          material: { ...preset.material },
-          materialId: activeVoxelMaterial,
-          color: matColor ? matColor.color : clickedVoxel.color,
-        });
-        addLog('info', 'Material', `更換材質 (${pos.x},${pos.y},${pos.z}) → ${preset.name}`);
-      }
+      eventBus.emit('context-menu:show', {
+        voxel: clickedVoxel,
+        screenX: e.nativeEvent.clientX,
+        screenY: e.nativeEvent.clientY,
+      });
     }
-  }, [voxels, activeVoxelMaterial, updateVoxel, addLog]);
+  }, [voxels]);
 
   return (
     <mesh visible={false} onClick={handleClick} onContextMenu={handleContextMenu} position={[0, -0.5, 0]}>
@@ -773,9 +825,32 @@ function LightingSystem() {
 }
 
 /* ============================================================
+   Ortho Camera Setup (for quad viewport)
+   ============================================================ */
+function OrthoCameraSetup({ direction }: { direction: string }) {
+  const { camera } = useThree();
+  const config = ORTHO_CONFIGS[direction];
+
+  useEffect(() => {
+    if (!config) return;
+    camera.position.set(...config.position);
+    camera.up.set(...config.up);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, [camera, config]);
+
+  return null;
+}
+
+/* ============================================================
    Main Scene Export
    ============================================================ */
-export function ViewportScene({ label }: { label?: string }) {
+interface ViewportSceneProps {
+  label?: string;
+  orthoDirection?: string | null;
+}
+
+export function ViewportScene({ label, orthoDirection }: ViewportSceneProps) {
   const showGrid = useStore(s => s.showGrid);
   const showAxes = useStore(s => s.showAxes);
   const camType = useStore(s => s.cameraType);
@@ -783,10 +858,18 @@ export function ViewportScene({ label }: { label?: string }) {
   const setFpMode = useStore(s => s.setFpMode);
   const selectedCount = useStore(s => s.selectedVoxelIds.length);
 
+  const isOrthoView = !!orthoDirection;
+  const useOrtho = isOrthoView || camType === 'orthographic';
+
+  // Determine camera position and up vector
+  const orthoConfig = orthoDirection ? ORTHO_CONFIGS[orthoDirection] : null;
+  const camPos: [number, number, number] = orthoConfig ? orthoConfig.position : [15, 12, 15];
+  const camUp: [number, number, number] = orthoConfig ? orthoConfig.up : [0, 1, 0];
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* First person mode prompt */}
-      {!fpMode && (
+      {/* First person mode prompt - only in main viewport */}
+      {!isOrthoView && !fpMode && (
         <div
           style={{
             position: 'absolute', top: 8, left: 8, zIndex: 10,
@@ -802,7 +885,7 @@ export function ViewportScene({ label }: { label?: string }) {
       )}
 
       {/* Selection count badge */}
-      {selectedCount > 0 && (
+      {selectedCount > 0 && !isOrthoView && (
         <div style={{
           position: 'absolute', top: 8, right: 8, zIndex: 10,
           padding: '3px 8px', borderRadius: 4,
@@ -814,7 +897,7 @@ export function ViewportScene({ label }: { label?: string }) {
       )}
 
       {/* FP crosshair */}
-      {fpMode && (
+      {fpMode && !isOrthoView && (
         <div style={{
           position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
           zIndex: 10, pointerEvents: 'none', fontSize: 24, color: 'rgba(255,255,255,0.3)', fontWeight: 'bold',
@@ -823,13 +906,16 @@ export function ViewportScene({ label }: { label?: string }) {
 
       <Canvas
         gl={{ antialias: true, alpha: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true }}
-        style={{ background: '#0d1117' }}
-        shadows={{ type: THREE.PCFSoftShadowMap }}
-        dpr={[1, 2]}
+        style={{ background: isOrthoView ? '#0a0e14' : '#0d1117' }}
+        shadows={isOrthoView ? false : { type: THREE.PCFSoftShadowMap }}
+        dpr={[1, isOrthoView ? 1 : 2]}
       >
-        {camType === 'perspective'
-          ? <PerspectiveCamera makeDefault position={[15, 12, 15]} fov={50} near={0.1} far={500} />
-          : <OrthographicCamera makeDefault position={[15, 12, 15]} zoom={20} near={-500} far={500} />}
+        {useOrtho
+          ? <OrthographicCamera makeDefault position={camPos} up={camUp} zoom={20} near={-500} far={500} />
+          : <PerspectiveCamera makeDefault position={camPos} fov={50} near={0.1} far={500} />}
+
+        {/* For ortho views, set camera orientation after mount */}
+        {isOrthoView && orthoDirection && <OrthoCameraSetup direction={orthoDirection} />}
 
         <LightingSystem />
 
@@ -843,15 +929,19 @@ export function ViewportScene({ label }: { label?: string }) {
             <Line points={[[0,0,0],[10,0,0]]} color="#ff4757" lineWidth={2} />
             <Line points={[[0,0,0],[0,10,0]]} color="#3dd68c" lineWidth={2} />
             <Line points={[[0,0,0],[0,0,10]]} color="#638cff" lineWidth={2} />
-            <Html position={[10.5, 0, 0]} center style={{ pointerEvents: 'none' }}>
-              <span style={{ color: '#ff4757', fontSize: 10, fontWeight: 'bold' }}>X</span>
-            </Html>
-            <Html position={[0, 10.5, 0]} center style={{ pointerEvents: 'none' }}>
-              <span style={{ color: '#3dd68c', fontSize: 10, fontWeight: 'bold' }}>Y</span>
-            </Html>
-            <Html position={[0, 0, 10.5]} center style={{ pointerEvents: 'none' }}>
-              <span style={{ color: '#638cff', fontSize: 10, fontWeight: 'bold' }}>Z</span>
-            </Html>
+            {!isOrthoView && (
+              <>
+                <Html position={[10.5, 0, 0]} center style={{ pointerEvents: 'none' }}>
+                  <span style={{ color: '#ff4757', fontSize: 10, fontWeight: 'bold' }}>X</span>
+                </Html>
+                <Html position={[0, 10.5, 0]} center style={{ pointerEvents: 'none' }}>
+                  <span style={{ color: '#3dd68c', fontSize: 10, fontWeight: 'bold' }}>Y</span>
+                </Html>
+                <Html position={[0, 0, 10.5]} center style={{ pointerEvents: 'none' }}>
+                  <span style={{ color: '#638cff', fontSize: 10, fontWeight: 'bold' }}>Z</span>
+                </Html>
+              </>
+            )}
           </group>
         )}
 
@@ -863,29 +953,32 @@ export function ViewportScene({ label }: { label?: string }) {
 
         <VoxelInstances />
         <SelectionOutline />
-        <BoxSelection />
+        {!isOrthoView && <BoxSelection />}
         <StressOverlay />
+        <ForceArrows />
         <GlueJointViz />
         <MeasurementViz />
         <PipelineResultViz />
-        <ClickHandler />
+        {!isOrthoView && <ClickHandler />}
 
-        {!fpMode && <OrbitControls makeDefault enableDamping dampingFactor={0.1} />}
-        <FirstPersonControls />
+        {!fpMode && <OrbitControls makeDefault enableDamping dampingFactor={0.1} enableRotate={!isOrthoView} />}
+        {!isOrthoView && <FirstPersonControls />}
 
-        {/* GizmoViewcube - click faces to change view */}
-        <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-          <GizmoViewcube
-            color="#21262d"
-            strokeColor="#58a6ff"
-            textColor="#e6edf3"
-            opacity={0.9}
-            hoverColor="#30363d"
-          />
-        </GizmoHelper>
+        {/* GizmoViewcube - only in main viewport */}
+        {!isOrthoView && (
+          <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+            <GizmoViewcube
+              color="#21262d"
+              strokeColor="#58a6ff"
+              textColor="#e6edf3"
+              opacity={0.9}
+              hoverColor="#30363d"
+            />
+          </GizmoHelper>
+        )}
 
-        <PerfMonitor />
-        <fog attach="fog" args={['#0d1117', 80, 200]} />
+        {!isOrthoView && <PerfMonitor />}
+        {!isOrthoView && <fog attach="fog" args={['#0d1117', 80, 200]} />}
       </Canvas>
     </div>
   );

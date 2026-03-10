@@ -5,8 +5,15 @@ import { projectManager } from '../engines/ProjectManager';
 import {
   MousePointer2, Plus, Eraser, Paintbrush, CircleDot, Waves, Droplets, Mountain,
   Ruler, Maximize2, Grid3x3, Undo2, Redo2, Link2, Anchor, Weight, Camera,
-  Save, FolderOpen, FileDown
+  Save, FolderOpen, FileDown, Settings, HelpCircle, Keyboard
 } from 'lucide-react';
+
+interface ToolbarProps {
+  onShowPipeline?: () => void;
+  onShowLOD?: () => void;
+  onShowAbout?: () => void;
+  onShowShortcuts?: () => void;
+}
 
 const tools: {id:ToolType;icon:any;label:string;key:string}[] = [
   {id:'select',icon:MousePointer2,label:'選取',key:'V'},
@@ -39,7 +46,7 @@ const tags: {id:ToolType;label:string;color:string}[] = [
   {id:'tag-fillet',label:'Fillet',color:'#f5a623'},
 ];
 
-export function Toolbar() {
+export function Toolbar({ onShowPipeline, onShowLOD, onShowAbout, onShowShortcuts }: ToolbarProps) {
   const activeTool=useStore(s=>s.activeTool), setTool=useStore(s=>s.setTool);
   const viewMode=useStore(s=>s.viewMode), setViewMode=useStore(s=>s.setViewMode);
   const viewLayout=useStore(s=>s.viewLayout), setViewLayout=useStore(s=>s.setViewLayout);
@@ -179,6 +186,13 @@ export function Toolbar() {
       {/* Spacer */}
       <div className="toolbar-spacer"/>
 
+      {/* Help/Info buttons */}
+      <div className="toolbar-group">
+        <button className="btn-icon" onClick={onShowShortcuts} title="快捷鍵 (F1)"><Keyboard size={14}/></button>
+        <button className="btn-icon" onClick={onShowAbout} title="關於"><HelpCircle size={14}/></button>
+      </div>
+      <div className="toolbar-divider"/>
+
       {/* Screenshot */}
       <div className="toolbar-group">
         <button className="btn-icon" onClick={() => projectManager.takeScreenshot()} title="截圖 (Ctrl+Shift+S)">
@@ -189,8 +203,8 @@ export function Toolbar() {
 
       {/* Pipeline */}
       <div className="toolbar-group">
-        <button className="btn btn-primary" onClick={startPipeline}
-          disabled={pipeline.status==='running'} style={{fontSize:11}}>
+        <button className="btn btn-primary" onClick={onShowPipeline || startPipeline}
+          style={{fontSize:11}}>
           {pipeline.status==='running'?'轉換中...':'體素→NURBS'}
         </button>
       </div>

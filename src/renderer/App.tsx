@@ -9,6 +9,10 @@ import { TexturePanel } from './components/panels/TexturePanel';
 import { LoadAnalysisPanel } from './components/panels/LoadAnalysisPanel';
 import { CommandLine } from './components/CommandLine';
 import { StatusBar } from './components/StatusBar';
+import { AboutDialog } from './components/dialogs/AboutDialog';
+import { ShortcutsDialog } from './components/dialogs/ShortcutsDialog';
+import { PipelineDialog } from './components/dialogs/PipelineDialog';
+import { LODDialog } from './components/dialogs/LODDialog';
 import { runVoxelToNURBS } from './pipeline/VoxelToNURBS';
 import { voxelEngine } from './engines/VoxelEngine';
 import { loadEngine, MATERIAL_PRESETS } from './engines/LoadEngine';
@@ -16,11 +20,17 @@ import { projectManager } from './engines/ProjectManager';
 import { glueEngine } from './engines/GlueEngine';
 import eventBus from './engines/EventBus';
 import { Layers, Image, BarChart3 } from 'lucide-react';
+import { SceneStatsPanel } from './components/panels/SceneStatsPanel';
+import { ContextMenu } from './components/ContextMenu';
 
 type RightTab = 'layers' | 'texture' | 'load';
 
 export default function App() {
   const [rightTab, setRightTab] = useState<RightTab>('layers');
+  const [showAbout, setShowAbout] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showPipeline, setShowPipeline] = useState(false);
+  const [showLOD, setShowLOD] = useState(false);
   const pipeline = useStore(s => s.pipeline);
   const voxels = useStore(s => s.voxels);
   const addLog = useStore(s => s.addLog);
@@ -30,6 +40,25 @@ export default function App() {
   const addGlueJoint = useStore(s => s.addGlueJoint);
   const removeGlueJoint = useStore(s => s.removeGlueJoint);
   const clearGlueJoints = useStore(s => s.clearGlueJoints);
+
+  // ─── IPC from Electron menu ───
+  useEffect(() => {
+    const w = window as any;
+    if (w.electronAPI) {
+      w.electronAPI.onMenuAction?.((action: string) => {
+        switch (action) {
+          case 'about': setShowAbout(true); break;
+          case 'shortcuts': setShowShortcuts(true); break;
+          case 'pipeline': setShowPipeline(true); break;
+          case 'lod': setShowLOD(true); break;
+          case 'new-project': projectManager.newProject(); break;
+          case 'open-project': projectManager.openProject(); break;
+          case 'save-project': projectManager.downloadProject(); break;
+          case 'screenshot': projectManager.takeScreenshot(); break;
+        }
+      });
+    }
+  }, []);
 
   // ─── Glue Joint Event Handlers ───
   useEffect(() => {
@@ -74,18 +103,17 @@ export default function App() {
 
   // ─── Init + Demo voxels + Auto-save ───
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.4 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v1.5 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
     addLog('info', 'System', 'FEA 負載引擎 (桁架分析 + CG 求解器 + 材質預設庫) 就緒');
     addLog('info', 'System', '體素引擎 (Octree + Undo/Redo + 三種刷形狀) 就緒');
     addLog('info', 'System', 'Glue Joint 黏合系統就緒');
     addLog('info', 'System', '專案管理器就緒（自動儲存每 5 分鐘）');
+    addLog('info', 'System', '對話框系統就緒（關於/快捷鍵/管線/LOD）');
 
-    // Start auto-save
     projectManager.startAutoSave();
 
-    // Check for auto-save recovery
     if (projectManager.checkAutoSaveRecovery()) {
       addLog('warning', 'AutoSave', '偵測到未儲存的自動備份，可透過指令列輸入 RECOVER 恢復');
     }
@@ -183,7 +211,6 @@ export default function App() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const s = useStore.getState();
 
-      // Ctrl shortcuts
       if (e.ctrlKey || e.metaKey) {
         switch (e.key.toLowerCase()) {
           case 'z': e.preventDefault(); voxelEngine.undo(); return;
@@ -204,6 +231,42 @@ export default function App() {
 
       if (s.fpMode && e.key !== 'Escape') return;
 
+      // Ctrl+A: select all
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        s.selectVoxels(s.voxels.map(v => v.id));
+        s.addLog('info', 'Edit', `已全選 ${s.voxels.length} 個體素`);
+        return;
+      }
+
+      switch (e.key) {
+        case 'Escape':
+          if (s.selectedVoxelIds.length > 0) {
+            s.clearSelection();
+            s.addLog('info', 'Edit', '已取消選取');
+          }
+          break;
+        case 'F1':
+          e.preventDefault(); setShowShortcuts(true); break;
+        case 'Delete':
+        case 'Backspace': {
+          const selected = s.selectedVoxelIds;
+          if (selected.length > 0) {
+            selected.forEach(id => {
+              const v = s.voxels.find(v => v.id === id);
+              if (v) {
+                s.removeVoxel(id);
+                voxelEngine.removeVoxel(v.pos);
+              }
+            });
+            s.clearSelection();
+            s.addLog('info', 'Edit', `已刪除 ${selected.length} 個選取的體素`);
+          }
+          break;
+        }
+        default: break;
+      }
+
       switch (e.key.toLowerCase()) {
         case 'v': s.setTool('select'); break;
         case 'b': e.shiftKey ? s.setTool('brush') : s.setTool('place'); break;
@@ -219,21 +282,6 @@ export default function App() {
         case '6': s.setViewMode('solid'); break;
         case '7': s.setViewMode('rendered'); break;
         case 'f': if (e.shiftKey) s.setTool('fill'); break;
-        case 'delete': {
-          const selected = s.selectedVoxelIds;
-          if (selected.length > 0) {
-            selected.forEach(id => {
-              const v = s.voxels.find(v => v.id === id);
-              if (v) {
-                s.removeVoxel(id);
-                voxelEngine.removeVoxel(v.pos);
-              }
-            });
-            s.clearSelection();
-            s.addLog('info', 'Edit', `已刪除 ${selected.length} 個選取的體素`);
-          }
-          break;
-        }
       }
     };
     window.addEventListener('keydown', handler);
@@ -242,10 +290,16 @@ export default function App() {
 
   return (
     <div className="app-root">
-      <Toolbar />
+      <Toolbar
+        onShowPipeline={() => setShowPipeline(true)}
+        onShowLOD={() => setShowLOD(true)}
+        onShowAbout={() => setShowAbout(true)}
+        onShowShortcuts={() => setShowShortcuts(true)}
+      />
       <div className="app-main">
         <div className="app-sidebar left">
           <PropertiesPanel />
+          <SceneStatsPanel />
         </div>
         <div className="app-center">
           <div className="app-viewport">
@@ -268,6 +322,13 @@ export default function App() {
         </div>
       </div>
       <StatusBar />
+
+      {/* Dialogs */}
+      <ContextMenu />
+      <AboutDialog open={showAbout} onClose={() => setShowAbout(false)} />
+      <ShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      <PipelineDialog open={showPipeline} onClose={() => setShowPipeline(false)} />
+      <LODDialog open={showLOD} onClose={() => setShowLOD(false)} />
     </div>
   );
 }
