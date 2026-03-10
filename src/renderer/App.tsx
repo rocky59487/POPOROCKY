@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useStore, DEFAULT_MATERIALS, Voxel } from './store/useStore';
+import { useStore, Voxel } from './store/useStore';
 import { Toolbar } from './components/Toolbar';
 import { Viewport3D } from './components/viewport/Viewport3D';
 import { LayerPanel } from './components/panels/LayerPanel';
@@ -10,6 +10,7 @@ import { LoadAnalysisPanel } from './components/panels/LoadAnalysisPanel';
 import { StatusBar } from './components/StatusBar';
 import { runVoxelToNURBS } from './pipeline/VoxelToNURBS';
 import { voxelEngine } from './engines/VoxelEngine';
+import { loadEngine, MATERIAL_PRESETS } from './engines/LoadEngine';
 import { Layers, Image, BarChart3 } from 'lucide-react';
 
 type RightTab = 'layers' | 'texture' | 'load';
@@ -23,25 +24,26 @@ export default function App() {
   const completePipeline = useStore(s => s.completePipeline);
   const addVoxel = useStore(s => s.addVoxel);
 
-  // Demo voxels with proper material properties
+  // Demo voxels with material presets
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.0 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v1.2 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '演算法管線 (Marching Cubes → QEM → NURBS) 就緒');
-    addLog('info', 'System', 'FEA 負載引擎 (簡化桁架分析 + CG 求解器) 就緒');
+    addLog('info', 'System', 'FEA 負載引擎 (桁架分析 + CG 求解器 + 材質預設庫) 就緒');
+    addLog('info', 'System', '體素引擎 (Octree + Undo/Redo + 三種刷形狀) 就緒');
 
-    const concreteMat = DEFAULT_MATERIALS.concrete;
-    const steelMat = DEFAULT_MATERIALS.steel;
-    const brickMat = DEFAULT_MATERIALS.brick;
+    const concrete = MATERIAL_PRESETS.find(p => p.id === 'concrete')!.material;
+    const steel = MATERIAL_PRESETS.find(p => p.id === 'steel')!.material;
+    const brick = MATERIAL_PRESETS.find(p => p.id === 'brick')!.material;
 
     let c = 0;
 
-    // Ground floor (concrete, set as support)
+    // Ground floor (concrete, support)
     for (let x = -4; x <= 4; x++) {
       for (let z = -4; z <= 4; z++) {
         const v: Voxel = {
           id: `d_${c++}`, pos: { x, y: 0, z }, color: '#3a3a5c',
-          layerId: 'structure', material: { ...concreteMat }, isSupport: true,
+          layerId: 'structure', material: { ...concrete }, isSupport: true, materialId: 'concrete',
         };
         addVoxel(v);
         voxelEngine.addVoxel(v);
@@ -54,7 +56,7 @@ export default function App() {
       for (let y = 1; y <= 5; y++) {
         const v: Voxel = {
           id: `d_${c++}`, pos: { x: px, y, z: pz }, color: pillarColors[y % pillarColors.length],
-          layerId: 'structure', material: { ...steelMat }, isSupport: false,
+          layerId: 'structure', material: { ...steel }, isSupport: false, materialId: 'steel',
         };
         addVoxel(v);
         voxelEngine.addVoxel(v);
@@ -66,7 +68,7 @@ export default function App() {
       for (let z = -4; z <= 4; z++) {
         const v: Voxel = {
           id: `d_${c++}`, pos: { x, y: 6, z }, color: '#f5a623',
-          layerId: 'decoration', material: { ...brickMat }, isSupport: false,
+          layerId: 'decoration', material: { ...brick }, isSupport: false, materialId: 'brick',
         };
         addVoxel(v);
         voxelEngine.addVoxel(v);
@@ -77,7 +79,7 @@ export default function App() {
     for (let y = 1; y <= 3; y++) {
       const v: Voxel = {
         id: `d_${c++}`, pos: { x: 0, y, z: 0 }, color: '#a78bfa',
-        layerId: 'default', material: { ...concreteMat }, isSupport: false,
+        layerId: 'default', material: { ...concrete }, isSupport: false, materialId: 'concrete',
       };
       addVoxel(v);
       voxelEngine.addVoxel(v);
@@ -103,13 +105,27 @@ export default function App() {
     })();
   }, [pipeline.status]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (including Ctrl+Z/Y for undo/redo)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const s = useStore.getState();
 
-      // Don't process shortcuts in first-person mode (except Escape)
+      // Undo/Redo (works even in FP mode)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        const result = voxelEngine.undo();
+        if (result) s.addLog('info', 'Edit', `復原 (剩餘 ${voxelEngine.getUndoCount()} 步)`);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        const result = voxelEngine.redo();
+        if (result) s.addLog('info', 'Edit', `重做 (剩餘 ${voxelEngine.getRedoCount()} 步)`);
+        return;
+      }
+
+      // Don't process other shortcuts in first-person mode (except Escape)
       if (s.fpMode && e.key !== 'Escape') return;
 
       switch (e.key.toLowerCase()) {

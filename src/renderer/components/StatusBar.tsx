@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
-import { Activity, Cpu, Triangle, Box, MousePointer2 } from 'lucide-react';
+import { Activity, Cpu, Triangle, Box, MousePointer2, Layers } from 'lucide-react';
 
 const toolNames: Record<string, string> = {
   select: '選取', place: '放置', erase: '刪除', paint: '上色',
@@ -19,6 +19,9 @@ export function StatusBar() {
   const engines = useStore(s => s.engines);
   const loadAnalysis = useStore(s => s.loadAnalysis);
   const fpMode = useStore(s => s.fpMode);
+  const currentLOD = useStore(s => s.currentLOD);
+  const isCollabActive = useStore(s => s.isCollabActive);
+  const collabUsers = useStore(s => s.collabUsers);
   const rc = engines.filter(e => e.running).length;
 
   return (
@@ -30,8 +33,11 @@ export function StatusBar() {
         <span className="status-divider">|</span>
         <span className="status-item"><Triangle size={10} /> 三角面: {tris}</span>
         <span className="status-divider">|</span>
+        <span className="status-item"><Layers size={10} /> LOD{currentLOD}</span>
+        <span className="status-divider">|</span>
         <span className="status-item">引擎: {rc}/{engines.length}</span>
         {fpMode && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--accent)' }}>第一人稱模式</span></>}
+        {isCollabActive && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--success)' }}>協作: {collabUsers.filter(u=>u.online).length} 人在線</span></>}
         {pl.status === 'running' && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--accent)' }}>管線: {pl.progress.toFixed(0)}%</span></>}
         {pl.status === 'done' && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--success)' }}>NURBS 已生成</span></>}
         {loadAnalysis.isComputing && <><span className="status-divider">|</span><span className="status-item" style={{ color: 'var(--warning)' }}>FEA 計算中...</span></>}
@@ -42,7 +48,7 @@ export function StatusBar() {
         <span className="status-divider">|</span>
         <span className="status-item"><Cpu size={10} /> {mem} MB</span>
         <span className="status-divider">|</span>
-        <span className="status-item">FastDesign v1.0</span>
+        <span className="status-item">FastDesign v1.2</span>
       </div>
     </div>
   );

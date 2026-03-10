@@ -1,6 +1,7 @@
 import React from 'react';
 import { useStore, ToolType, SelectMode } from '../store/useStore';
-import { MousePointer2, Plus, Eraser, Paintbrush, CircleDot, Waves, Droplets, Mountain, Ruler, Maximize2, Grid3x3 } from 'lucide-react';
+import { voxelEngine } from '../engines/VoxelEngine';
+import { MousePointer2, Plus, Eraser, Paintbrush, CircleDot, Waves, Droplets, Mountain, Ruler, Maximize2, Grid3x3, Undo2, Redo2 } from 'lucide-react';
 
 const tools: {id:ToolType;icon:any;label:string;key:string}[] = [
   {id:'select',icon:MousePointer2,label:'選取',key:'V'},{id:'place',icon:Plus,label:'放置',key:'B'},
@@ -21,9 +22,28 @@ export function Toolbar() {
   const brushSize=useStore(s=>s.brushSize), setBrushSize=useStore(s=>s.setBrushSize);
   const paintColor=useStore(s=>s.paintColor), setPaintColor=useStore(s=>s.setPaintColor);
   const pipeline=useStore(s=>s.pipeline), startPipeline=useStore(s=>s.startPipeline);
+  const addLog=useStore(s=>s.addLog);
+
+  const handleUndo = () => {
+    const result = voxelEngine.undo();
+    if (result) {
+      addLog('info', 'Edit', `復原 (剩餘 ${voxelEngine.getUndoCount()} 步)`);
+    }
+  };
+  const handleRedo = () => {
+    const result = voxelEngine.redo();
+    if (result) {
+      addLog('info', 'Edit', `重做 (剩餘 ${voxelEngine.getRedoCount()} 步)`);
+    }
+  };
 
   return (
     <div className="app-toolbar-row">
+      <div className="toolbar-group">
+        <button className="btn-icon" onClick={handleUndo} title="復原 (Ctrl+Z)" disabled={voxelEngine.getUndoCount() === 0}><Undo2 size={15}/></button>
+        <button className="btn-icon" onClick={handleRedo} title="重做 (Ctrl+Y)" disabled={voxelEngine.getRedoCount() === 0}><Redo2 size={15}/></button>
+      </div>
+      <div className="toolbar-divider"/>
       <div className="toolbar-group">
         {tools.map(t=>{const I=t.icon;return(<button key={t.id} className={`btn-icon ${activeTool===t.id?'active':''}`} onClick={()=>setTool(t.id)} title={`${t.label} (${t.key})`}><I size={15}/></button>);})}
       </div>
