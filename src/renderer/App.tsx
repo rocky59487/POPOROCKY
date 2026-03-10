@@ -26,6 +26,8 @@ import { BrushSettingsPanel } from './components/panels/BrushSettingsPanel';
 import { TemplateLibrary } from './components/panels/TemplateLibrary';
 import { AnalysisTimeline } from './components/panels/AnalysisTimeline';
 import { ContextMenu } from './components/ContextMenu';
+import { MaterialEditor } from './components/panels/MaterialEditor';
+import { IntegrityCheck } from './components/panels/IntegrityCheck';
 
 type RightTab = 'layers' | 'texture' | 'load';
 
@@ -145,7 +147,7 @@ export default function App() {
 
   // ─── Init + Demo voxels + Auto-save ───
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.6 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v1.7 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
     addLog('info', 'System', 'FEA 負載引擎 (桁架分析 + CG 求解器 + 材質預設庫) 就緒');
@@ -273,10 +275,7 @@ export default function App() {
             s.selectVoxels(s.voxels.map(v => v.id));
             s.addLog('info', 'Edit', `已全選 ${s.voxels.length} 個體素`);
             return;
-          case 'e':
-            e.preventDefault();
-            OBJExporter.downloadOBJ();
-            return;
+          // Ctrl+E removed to avoid conflict with E=erase tool
         }
         return;
       }
@@ -294,6 +293,7 @@ export default function App() {
           e.preventDefault(); setShowShortcuts(true); break;
         case 'Delete':
         case 'Backspace': {
+          e.preventDefault();
           const selected = s.selectedVoxelIds;
           if (selected.length > 0) {
             selected.forEach(id => {
@@ -313,8 +313,8 @@ export default function App() {
 
       switch (e.key.toLowerCase()) {
         case 'q': s.setTool('select'); break;
-        case 'w': s.setTool('place'); break;
-        case 'e': s.setTool('erase'); break;
+        case 'w': if (!e.ctrlKey) s.setTool('place'); break;
+        case 'e': if (!e.ctrlKey) s.setTool('erase'); break;
         case 'g': if (!e.ctrlKey) s.setTool('glue'); break;
         case 'm': s.setTool('measure'); break;
         case 'b': e.shiftKey ? s.setTool('brush') : s.setTool('place'); break;
@@ -354,6 +354,7 @@ export default function App() {
       <div className="app-main">
         <div className="app-sidebar left">
           <PropertiesPanel />
+          <MaterialEditor />
           <BrushSettingsPanel />
           <SceneStatsPanel />
           <TemplateLibrary />
@@ -376,6 +377,7 @@ export default function App() {
             {rightTab === 'texture' && <TexturePanel />}
             {rightTab === 'load' && <LoadAnalysisPanel />}
           </div>
+          <IntegrityCheck />
           <AnalysisTimeline />
         </div>
       </div>

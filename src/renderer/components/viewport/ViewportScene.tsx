@@ -7,6 +7,7 @@ import { voxelEngine } from '../../engines/VoxelEngine';
 import { loadEngine } from '../../engines/LoadEngine';
 import { getLatestPipelineResult } from '../../pipeline/VoxelToNURBS';
 import eventBus from '../../engines/EventBus';
+import { GridSnapPreview } from './GridSnapPreview';
 
 /* ─── Material Color Map ─── */
 const MATERIAL_COLORS: Record<string, { color: string; roughness: number; metalness: number }> = {
@@ -920,8 +921,8 @@ export function ViewportScene({ label, orthoDirection }: ViewportSceneProps) {
         <LightingSystem />
 
         {showGrid && (
-          <Grid args={[100, 100]} cellSize={1} cellThickness={0.5} cellColor="#1a1a2e"
-            sectionSize={5} sectionThickness={1} sectionColor="#252540" fadeDistance={80} infiniteGrid />
+          <Grid args={[100, 100]} cellSize={1} cellThickness={0.6} cellColor="#1a1f2e"
+            sectionSize={5} sectionThickness={1.5} sectionColor="#30363d" fadeDistance={80} fadeStrength={1.5} infiniteGrid />
         )}
 
         {showAxes && (
@@ -959,6 +960,7 @@ export function ViewportScene({ label, orthoDirection }: ViewportSceneProps) {
         <GlueJointViz />
         <MeasurementViz />
         <PipelineResultViz />
+        {!isOrthoView && <GridSnapPreview />}
         {!isOrthoView && <ClickHandler />}
 
         {!fpMode && <OrbitControls makeDefault enableDamping dampingFactor={0.1} enableRotate={!isOrthoView} />}

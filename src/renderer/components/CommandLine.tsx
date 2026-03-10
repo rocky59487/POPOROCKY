@@ -1,6 +1,11 @@
 /**
  * CommandLine - AutoCAD-style Command Line Interface
  * Uses Fuse.js for fuzzy search, bottom-fixed panel with history + suggestions
+ * 
+ * v1.7 fixes:
+ * - Enter executes immediately if input exactly matches a command (case-insensitive)
+ * - Suggestions only show when there are multiple partial matches
+ * - Escape closes suggestions panel, second Escape clears input
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Fuse from 'fuse.js';
@@ -27,7 +32,7 @@ let lineIdCounter = 0;
 export function CommandLine() {
   const [input, setInput] = useState('');
   const [historyLines, setHistoryLines] = useState<HistoryLine[]>([
-    { id: lineIdCounter++, type: 'output', text: 'FastDesign v1.4 — 輸入 HELP 查看所有指令，`:` 或 `` ` `` 聚焦指令列', timestamp: Date.now() },
+    { id: lineIdCounter++, type: 'output', text: 'FastDesign v1.7 — 輸入 HELP 查看所有指令，`:` 或 `` ` `` 聚焦指令列', timestamp: Date.now() },
   ]);
   const [suggestions, setSuggestions] = useState<CommandDef[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
@@ -35,6 +40,7 @@ export function CommandLine() {
   const [isExpanded, setIsExpanded] = useState(true);
   const [cmdHistoryStack, setCmdHistoryStack] = useState<string[]>([]);
   const [cmdHistoryIdx, setCmdHistoryIdx] = useState(-1);
+  const [showSuggestions, setShowSuggestions] = useState(true);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -71,24 +77,40 @@ export function CommandLine() {
     }
 
     const parts = trimmed.split(/\s+/);
-    const cmdPart = parts[0];
+    const cmdPart = parts[0].toUpperCase();
 
     if (parts.length === 1) {
+      // Check for exact match first
+      const exact = commandEngine.getCommandByName(cmdPart);
+      if (exact) {
+        setParamHint(exact.syntax);
+        // If exact match, don't show suggestions (user can just press Enter)
+        if (exact.name.toUpperCase() === cmdPart) {
+          setSuggestions([]);
+          setSelectedSuggestion(-1);
+          return;
+        }
+      }
+
       // Fuzzy search via Fuse.js
       const results = fuse.search(cmdPart).slice(0, 8).map(r => r.item);
-      setSuggestions(results);
-      setSelectedSuggestion(results.length > 0 ? 0 : -1);
+      if (showSuggestions) {
+        setSuggestions(results);
+        setSelectedSuggestion(results.length > 0 ? 0 : -1);
+      }
 
-      // Check for exact match param hint
-      const exact = commandEngine.getCommandByName(cmdPart);
-      if (exact) setParamHint(exact.syntax);
-      else setParamHint('');
+      if (!exact && results.length > 0) {
+        setParamHint(results[0].syntax);
+      } else if (!exact) {
+        setParamHint('');
+      }
     } else {
       setSuggestions([]);
       const cmd = commandEngine.getCommandByName(cmdPart);
       if (cmd) setParamHint(cmd.syntax);
+      else setParamHint('');
     }
-  }, [input]);
+  }, [input, showSuggestions]);
 
   const addLine = useCallback((type: HistoryLine['type'], text: string) => {
     setHistoryLines(prev => {
@@ -117,31 +139,44 @@ export function CommandLine() {
     setInput('');
     setSuggestions([]);
     setParamHint('');
+    setShowSuggestions(true);
   }, [addLine]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     switch (e.key) {
-      case 'Enter':
+      case 'Enter': {
         e.preventDefault();
-        // If input has args (spaces), execute directly
-        if (input.trim().includes(' ')) {
+        const trimmed = input.trim();
+        if (!trimmed) return;
+
+        // If input has args (spaces), always execute directly
+        if (trimmed.includes(' ')) {
           executeCommand(input);
-        } else if (selectedSuggestion >= 0 && suggestions[selectedSuggestion]) {
-          // Check if input exactly matches the selected suggestion
-          const cmd = suggestions[selectedSuggestion];
-          if (cmd.name.toUpperCase() === input.trim().toUpperCase()) {
-            // Exact match - execute immediately
-            executeCommand(input);
-          } else {
-            // Partial match - fill in the suggestion
-            setInput(cmd.name + ' ');
-            setSuggestions([]);
-            setSelectedSuggestion(-1);
-          }
-        } else {
-          executeCommand(input);
+          return;
         }
+
+        // Check if input exactly matches a command name (case-insensitive)
+        const exactCmd = commandEngine.getCommandByName(trimmed.toUpperCase());
+        if (exactCmd) {
+          // Exact match → execute immediately, no autocomplete needed
+          executeCommand(trimmed);
+          return;
+        }
+
+        // If suggestions are showing and one is selected, fill it in
+        if (suggestions.length > 0 && selectedSuggestion >= 0 && suggestions[selectedSuggestion]) {
+          const cmd = suggestions[selectedSuggestion];
+          // If the selected suggestion needs args, fill it; otherwise execute
+          setInput(cmd.name + ' ');
+          setSuggestions([]);
+          setSelectedSuggestion(-1);
+          return;
+        }
+
+        // No exact match, no suggestion selected → try to execute anyway
+        executeCommand(input);
         break;
+      }
 
       case 'Tab':
         e.preventDefault();
@@ -185,13 +220,28 @@ export function CommandLine() {
 
       case 'Escape':
         e.preventDefault();
-        setSuggestions([]);
-        setSelectedSuggestion(-1);
-        setInput('');
-        inputRef.current?.blur();
+        if (suggestions.length > 0) {
+          // First Escape: close suggestions
+          setSuggestions([]);
+          setSelectedSuggestion(-1);
+          setShowSuggestions(false);
+        } else if (input.trim()) {
+          // Second Escape: clear input
+          setInput('');
+          setShowSuggestions(true);
+        } else {
+          // Third Escape: blur
+          inputRef.current?.blur();
+          setShowSuggestions(true);
+        }
         break;
     }
-  }, [input, suggestions, selectedSuggestion, executeCommand, cmdHistoryStack, cmdHistoryIdx]);
+  }, [input, suggestions, selectedSuggestion, executeCommand, cmdHistoryStack, cmdHistoryIdx, showSuggestions]);
+
+  // Re-enable suggestions when input changes
+  useEffect(() => {
+    setShowSuggestions(true);
+  }, [input]);
 
   const catColors: Record<string, string> = {
     voxel: '#58a6ff', view: '#3fb950', analysis: '#f85149',

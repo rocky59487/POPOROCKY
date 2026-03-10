@@ -16,8 +16,8 @@ interface ToolbarProps {
 }
 
 const tools: {id:ToolType;icon:any;label:string;key:string}[] = [
-  {id:'select',icon:MousePointer2,label:'選取',key:'V'},
-  {id:'place',icon:Plus,label:'放置',key:'B'},
+  {id:'select',icon:MousePointer2,label:'選取',key:'Q'},
+  {id:'place',icon:Plus,label:'放置',key:'W'},
   {id:'erase',icon:Eraser,label:'刪除',key:'E'},
   {id:'paint',icon:Paintbrush,label:'上色',key:'P'},
   {id:'brush',icon:CircleDot,label:'體素刷',key:'⇧B'},
