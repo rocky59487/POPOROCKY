@@ -12,102 +12,88 @@ import { StatusBar } from './components/StatusBar';
 import { runVoxelToNURBS } from './pipeline/VoxelToNURBS';
 import { voxelEngine } from './engines/VoxelEngine';
 import { loadEngine, MATERIAL_PRESETS } from './engines/LoadEngine';
+import { projectManager } from './engines/ProjectManager';
+import { glueEngine } from './engines/GlueEngine';
 import eventBus from './engines/EventBus';
 import { Layers, Image, BarChart3 } from 'lucide-react';
 
 type RightTab = 'layers' | 'texture' | 'load';
 
-/* ─── Glue Joint System ─── */
-export interface GlueJoint {
-  id: string;
-  voxelA: Vec3;
-  voxelB: Vec3;
-  strength: number; // 0-1, multiplier for connection stiffness
-  type: 'rigid' | 'flexible' | 'hinge';
-}
-
 export default function App() {
   const [rightTab, setRightTab] = useState<RightTab>('layers');
-  const [glueJoints, setGlueJoints] = useState<GlueJoint[]>([]);
   const pipeline = useStore(s => s.pipeline);
   const voxels = useStore(s => s.voxels);
   const addLog = useStore(s => s.addLog);
   const updatePipelineStage = useStore(s => s.updatePipelineStage);
   const completePipeline = useStore(s => s.completePipeline);
   const addVoxel = useStore(s => s.addVoxel);
+  const addGlueJoint = useStore(s => s.addGlueJoint);
+  const removeGlueJoint = useStore(s => s.removeGlueJoint);
+  const clearGlueJoints = useStore(s => s.clearGlueJoints);
 
   // ─── Glue Joint Event Handlers ───
   useEffect(() => {
-    const onGlueAdd = (data: { voxelA: Vec3; voxelB: Vec3; strength: number; type: string }) => {
-      const joint: GlueJoint = {
-        id: `glue_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    const onGlueAdd = (data: { id: string; voxelA: Vec3; voxelB: Vec3; strength: number; type: string }) => {
+      addGlueJoint({
+        id: data.id || `gj_${Date.now()}`,
         voxelA: data.voxelA,
         voxelB: data.voxelB,
-        strength: data.strength,
-        type: (data.type as GlueJoint['type']) || 'rigid',
-      };
-      setGlueJoints(prev => [...prev, joint]);
-      addLog('success', 'Glue', `黏合 (${data.voxelA.x},${data.voxelA.y},${data.voxelA.z}) ↔ (${data.voxelB.x},${data.voxelB.y},${data.voxelB.z}) [${data.type}]`);
+        type: data.type || 'rigid',
+        strength: data.strength || 1.0,
+      });
+      addLog('success', 'Glue', `黏合 (${data.voxelA.x},${data.voxelA.y},${data.voxelA.z}) ↔ (${data.voxelB.x},${data.voxelB.y},${data.voxelB.z})`);
     };
 
     const onGlueRemove = (data: { voxelA: Vec3; voxelB: Vec3 }) => {
-      setGlueJoints(prev => prev.filter(j =>
-        !(j.voxelA.x === data.voxelA.x && j.voxelA.y === data.voxelA.y && j.voxelA.z === data.voxelA.z &&
-          j.voxelB.x === data.voxelB.x && j.voxelB.y === data.voxelB.y && j.voxelB.z === data.voxelB.z) &&
-        !(j.voxelA.x === data.voxelB.x && j.voxelA.y === data.voxelB.y && j.voxelA.z === data.voxelB.z &&
-          j.voxelB.x === data.voxelA.x && j.voxelB.y === data.voxelA.y && j.voxelB.z === data.voxelA.z)
-      ));
-      addLog('info', 'Glue', `解除黏合 (${data.voxelA.x},${data.voxelA.y},${data.voxelA.z}) ↔ (${data.voxelB.x},${data.voxelB.y},${data.voxelB.z})`);
+      const state = useStore.getState();
+      const joint = state.glueJoints.find(j =>
+        (j.voxelA.x === data.voxelA.x && j.voxelA.y === data.voxelA.y && j.voxelA.z === data.voxelA.z &&
+         j.voxelB.x === data.voxelB.x && j.voxelB.y === data.voxelB.y && j.voxelB.z === data.voxelB.z) ||
+        (j.voxelA.x === data.voxelB.x && j.voxelA.y === data.voxelB.y && j.voxelA.z === data.voxelB.z &&
+         j.voxelB.x === data.voxelA.x && j.voxelB.y === data.voxelA.y && j.voxelB.z === data.voxelA.z)
+      );
+      if (joint) removeGlueJoint(joint.id);
+      addLog('info', 'Glue', `解除黏合`);
     };
 
-    // Project save/load events
-    const onProjectSave = (data: { filename: string }) => {
-      const state = useStore.getState();
-      const projectData = {
-        version: '1.3',
-        name: state.projectName,
-        voxels: state.voxels,
-        layers: state.layers,
-        glueJoints,
-        loadAnalysis: {
-          gravity: state.loadAnalysis.gravity,
-          gravityMagnitude: state.loadAnalysis.gravityMagnitude,
-        },
-        activeVoxelMaterial: state.activeVoxelMaterial,
-      };
-      const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${data.filename}.fdp`;
-      a.click();
-      URL.revokeObjectURL(url);
-      addLog('success', 'File', `專案已儲存為 ${data.filename}.fdp`);
+    const onGlueClear = () => {
+      clearGlueJoints();
+      addLog('info', 'Glue', '已清除所有黏合');
     };
 
     eventBus.on('glue:add', onGlueAdd);
     eventBus.on('glue:remove', onGlueRemove);
-    eventBus.on('project:save', onProjectSave);
+    eventBus.on('glue:clear', onGlueClear);
 
     return () => {
       eventBus.off('glue:add', onGlueAdd);
       eventBus.off('glue:remove', onGlueRemove);
-      eventBus.off('project:save', onProjectSave);
+      eventBus.off('glue:clear', onGlueClear);
     };
-  }, [glueJoints, addLog]);
+  }, [addGlueJoint, removeGlueJoint, clearGlueJoints, addLog]);
 
-  // ─── Demo voxels ───
+  // ─── Init + Demo voxels + Auto-save ───
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.3 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v1.4 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
     addLog('info', 'System', 'FEA 負載引擎 (桁架分析 + CG 求解器 + 材質預設庫) 就緒');
     addLog('info', 'System', '體素引擎 (Octree + Undo/Redo + 三種刷形狀) 就緒');
     addLog('info', 'System', 'Glue Joint 黏合系統就緒');
+    addLog('info', 'System', '專案管理器就緒（自動儲存每 5 分鐘）');
+
+    // Start auto-save
+    projectManager.startAutoSave();
+
+    // Check for auto-save recovery
+    if (projectManager.checkAutoSaveRecovery()) {
+      addLog('warning', 'AutoSave', '偵測到未儲存的自動備份，可透過指令列輸入 RECOVER 恢復');
+    }
 
     const concrete = MATERIAL_PRESETS.find(p => p.id === 'concrete')!.material;
     const steel = MATERIAL_PRESETS.find(p => p.id === 'steel')!.material;
     const brick = MATERIAL_PRESETS.find(p => p.id === 'brick')!.material;
+    const wood = MATERIAL_PRESETS.find(p => p.id === 'wood')!.material;
 
     let c = 0;
 
@@ -158,7 +144,6 @@ export default function App() {
     }
 
     // Wood beams
-    const wood = MATERIAL_PRESETS.find(p => p.id === 'wood')!.material;
     for (let x = -3; x <= 3; x++) {
       const v: Voxel = {
         id: `d_${c++}`, pos: { x, y: 3, z: 0 }, color: '#8B4513',
@@ -169,6 +154,10 @@ export default function App() {
     }
 
     addLog('success', 'Demo', `已載入示範結構: ${c} 個體素（混凝土=灰, 鋼=銀, 磚=紅棕, 木=棕）`);
+
+    return () => {
+      projectManager.stopAutoSave();
+    };
   }, []);
 
   // Pipeline execution
@@ -191,32 +180,28 @@ export default function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Allow command line input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const s = useStore.getState();
 
-      // Undo/Redo
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        e.preventDefault();
-        const result = voxelEngine.undo();
-        if (result) s.addLog('info', 'Edit', `復原 (剩餘 ${voxelEngine.getUndoCount()} 步)`);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
-        e.preventDefault();
-        const result = voxelEngine.redo();
-        if (result) s.addLog('info', 'Edit', `重做 (剩餘 ${voxelEngine.getRedoCount()} 步)`);
+      // Ctrl shortcuts
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 'z': e.preventDefault(); voxelEngine.undo(); return;
+          case 'y': e.preventDefault(); voxelEngine.redo(); return;
+          case 's':
+            e.preventDefault();
+            if (e.shiftKey) {
+              projectManager.takeScreenshot();
+            } else {
+              projectManager.downloadProject();
+            }
+            return;
+          case 'o': e.preventDefault(); projectManager.openProject(); return;
+          case 'n': e.preventDefault(); projectManager.newProject(); return;
+        }
         return;
       }
 
-      // Save
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        eventBus.emit('project:save', { filename: s.projectName || 'project' });
-        return;
-      }
-
-      // Don't process other shortcuts in first-person mode
       if (s.fpMode && e.key !== 'Escape') return;
 
       switch (e.key.toLowerCase()) {
@@ -225,7 +210,7 @@ export default function App() {
         case 'e': s.setTool('erase'); break;
         case 'p': s.setTool('paint'); break;
         case 'm': s.setTool('measure'); break;
-        case 'g': if (!e.ctrlKey) s.toggleGrid(); break;
+        case 'g': if (!e.ctrlKey) s.setTool('glue'); break;
         case 'x': s.toggleAxes(); break;
         case '1': s.setTool('tag-sharp'); break;
         case '2': s.setTool('tag-smooth'); break;
@@ -235,7 +220,6 @@ export default function App() {
         case '7': s.setViewMode('rendered'); break;
         case 'f': if (e.shiftKey) s.setTool('fill'); break;
         case 'delete': {
-          // Delete selected voxels
           const selected = s.selectedVoxelIds;
           if (selected.length > 0) {
             selected.forEach(id => {

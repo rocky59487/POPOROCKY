@@ -4,7 +4,7 @@ import { immer } from 'zustand/middleware/immer';
 /* ============================================================
    Types
    ============================================================ */
-export type ToolType = 'select'|'place'|'erase'|'paint'|'brush'|'smooth'|'fill'|'sculpt'|'measure'|'tag-sharp'|'tag-smooth'|'tag-fillet'|'set-support'|'set-load';
+export type ToolType = 'select'|'place'|'erase'|'paint'|'brush'|'smooth'|'fill'|'sculpt'|'measure'|'tag-sharp'|'tag-smooth'|'tag-fillet'|'set-support'|'set-load'|'glue';
 export type ViewMode = 'wireframe'|'solid'|'rendered';
 export type ViewLayout = 'single'|'quad';
 export type CameraType = 'perspective'|'orthographic';
@@ -147,6 +147,16 @@ export interface AppState {
   // Active voxel material for new voxels
   activeVoxelMaterial: string; // key into DEFAULT_MATERIALS
 
+  // Project save/load
+  projectFilePath: string | null;
+  recentProjects: { name: string; path: string; date: number }[];
+  autoSaveEnabled: boolean;
+  lastSaveTime: number;
+  isDirty: boolean; // unsaved changes
+
+  // Glue joints
+  glueJoints: { id: string; voxelA: Vec3; voxelB: Vec3; type: string; strength: number }[];
+
   // Actions
   setTool: (tool: ToolType) => void;
   setViewLayout: (l: ViewLayout) => void;
@@ -206,6 +216,22 @@ export interface AppState {
 
   updatePerformance: (fps: number, mem: number, tris: number, draws: number) => void;
   setProjectName: (n: string) => void;
+
+  // Project save/load
+  setProjectFilePath: (p: string | null) => void;
+  addRecentProject: (name: string, path: string) => void;
+  setAutoSave: (enabled: boolean) => void;
+  markDirty: () => void;
+  markSaved: () => void;
+
+  // Glue
+  addGlueJoint: (joint: { id: string; voxelA: Vec3; voxelB: Vec3; type: string; strength: number }) => void;
+  removeGlueJoint: (id: string) => void;
+  clearGlueJoints: () => void;
+
+  // Bulk operations
+  setVoxels: (voxels: Voxel[]) => void;
+  setLayers: (layers: Layer[]) => void;
 }
 
 const defaultLayers: Layer[] = [
@@ -275,6 +301,12 @@ export const useStore = create<AppState>()(
     ],
     fps: 60, memoryUsage: 0, triangleCount: 0, drawCalls: 0,
     activeVoxelMaterial: 'concrete',
+    projectFilePath: null,
+    recentProjects: [],
+    autoSaveEnabled: true,
+    lastSaveTime: Date.now(),
+    isDirty: false,
+    glueJoints: [],
 
     setTool: (tool) => set((s) => { s.activeTool = tool; }),
     setViewLayout: (l) => set((s) => { s.viewLayout = l; }),
@@ -403,6 +435,21 @@ export const useStore = create<AppState>()(
     updatePerformance: (fps, mem, tris, draws) => set((s) => {
       s.fps = fps; s.memoryUsage = mem; s.triangleCount = tris; s.drawCalls = draws;
     }),
-    setProjectName: (n) => set((s) => { s.projectName = n; }),
+    setProjectName: (n) => set((s) => { s.projectName = n; s.isDirty = true; }),
+
+    setProjectFilePath: (p) => set((s) => { s.projectFilePath = p; }),
+    addRecentProject: (name, path) => set((s) => {
+      s.recentProjects = [{ name, path, date: Date.now() }, ...s.recentProjects.filter(r => r.path !== path)].slice(0, 10);
+    }),
+    setAutoSave: (enabled) => set((s) => { s.autoSaveEnabled = enabled; }),
+    markDirty: () => set((s) => { s.isDirty = true; }),
+    markSaved: () => set((s) => { s.isDirty = false; s.lastSaveTime = Date.now(); }),
+
+    addGlueJoint: (joint) => set((s) => { s.glueJoints.push(joint as any); s.isDirty = true; }),
+    removeGlueJoint: (id) => set((s) => { s.glueJoints = s.glueJoints.filter(j => j.id !== id); s.isDirty = true; }),
+    clearGlueJoints: () => set((s) => { s.glueJoints = []; s.isDirty = true; }),
+
+    setVoxels: (voxels) => set((s) => { s.voxels = voxels as any; }),
+    setLayers: (layers) => set((s) => { s.layers = layers as any; }),
   }))
 );

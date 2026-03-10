@@ -1,11 +1,11 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
-import { Activity, Cpu, Triangle, Box, MousePointer2, Layers } from 'lucide-react';
+import { Activity, Cpu, Triangle, Box, MousePointer2, Layers, Link2, Save } from 'lucide-react';
 
 const toolNames: Record<string, string> = {
   select: '選取', place: '放置', erase: '刪除', paint: '上色',
   brush: '體素刷', smooth: '平滑', fill: '填充', sculpt: '雕刻',
-  measure: '測量', 'tag-sharp': 'Sharp', 'tag-smooth': 'Smooth', 'tag-fillet': 'Fillet',
+  measure: '測量', glue: '黏合', 'tag-sharp': 'Sharp', 'tag-smooth': 'Smooth', 'tag-fillet': 'Fillet',
   'set-support': '設定支撐點', 'set-load': '施加負載',
 };
 
@@ -22,6 +22,10 @@ export function StatusBar() {
   const currentLOD = useStore(s => s.currentLOD);
   const isCollabActive = useStore(s => s.isCollabActive);
   const collabUsers = useStore(s => s.collabUsers);
+  const selectedCount = useStore(s => s.selectedVoxelIds.length);
+  const glueCount = useStore(s => s.glueJoints.length);
+  const isDirty = useStore(s => s.isDirty);
+  const projectName = useStore(s => s.projectName);
   const rc = engines.filter(e => e.running).length;
 
   return (
@@ -32,6 +36,14 @@ export function StatusBar() {
         <span className="status-item"><Box size={10} /> 體素: {vc}</span>
         <span className="status-divider">|</span>
         <span className="status-item"><Triangle size={10} /> 三角面: {tris}</span>
+        {glueCount > 0 && <>
+          <span className="status-divider">|</span>
+          <span className="status-item"><Link2 size={10} /> 黏合: {glueCount}</span>
+        </>}
+        {selectedCount > 0 && <>
+          <span className="status-divider">|</span>
+          <span className="status-item" style={{ color: 'var(--accent)' }}>已選: {selectedCount}</span>
+        </>}
         <span className="status-divider">|</span>
         <span className="status-item"><Layers size={10} /> LOD{currentLOD}</span>
         <span className="status-divider">|</span>
@@ -44,11 +56,15 @@ export function StatusBar() {
         {loadAnalysis.result && !loadAnalysis.isComputing && <><span className="status-divider">|</span><span className="status-item" style={{ color: loadAnalysis.result.dangerCount > 0 ? 'var(--error)' : 'var(--success)' }}>FEA: {loadAnalysis.result.dangerCount} 危險邊</span></>}
       </div>
       <div className="status-section">
+        <span className="status-item">
+          <Save size={10} /> {projectName}{isDirty ? ' *' : ''}
+        </span>
+        <span className="status-divider">|</span>
         <span className="status-item" style={{ color: fps >= 50 ? 'var(--success)' : fps >= 30 ? 'var(--warning)' : 'var(--error)' }}><Activity size={10} /> {fps} FPS</span>
         <span className="status-divider">|</span>
         <span className="status-item"><Cpu size={10} /> {mem} MB</span>
         <span className="status-divider">|</span>
-        <span className="status-item">FastDesign v1.2</span>
+        <span className="status-item">FastDesign v1.4</span>
       </div>
     </div>
   );

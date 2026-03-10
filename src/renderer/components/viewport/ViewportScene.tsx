@@ -1,17 +1,17 @@
 import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Grid, GizmoHelper, GizmoViewport, Line, PerspectiveCamera, OrthographicCamera, Environment, ContactShadows, Html } from '@react-three/drei';
+import { OrbitControls, Grid, GizmoHelper, GizmoViewcube, Line, PerspectiveCamera, OrthographicCamera, ContactShadows, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useStore, Voxel, DEFAULT_MATERIALS } from '../../store/useStore';
 import { voxelEngine } from '../../engines/VoxelEngine';
-import { loadEngine, MATERIAL_PRESETS } from '../../engines/LoadEngine';
+import { loadEngine } from '../../engines/LoadEngine';
 import { getLatestPipelineResult } from '../../pipeline/VoxelToNURBS';
 import eventBus from '../../engines/EventBus';
 
 /* ─── Material Color Map ─── */
 const MATERIAL_COLORS: Record<string, { color: string; roughness: number; metalness: number }> = {
   concrete: { color: '#808080', roughness: 0.9, metalness: 0.0 },
-  steel:    { color: '#C0C0C0', roughness: 0.2, metalness: 0.8 },
+  steel:    { color: '#C0C0C0', roughness: 0.2, metalness: 0.9 },
   wood:     { color: '#8B4513', roughness: 0.8, metalness: 0.0 },
   brick:    { color: '#8B3A3A', roughness: 0.85, metalness: 0.0 },
   aluminum: { color: '#d0d0e0', roughness: 0.3, metalness: 0.7 },
@@ -27,10 +27,8 @@ function VoxelInstances() {
   const viewMode = useStore(s => s.viewMode);
   const layers = useStore(s => s.layers);
   const meshRef = useRef<THREE.InstancedMesh>(null);
-  const edgesRef = useRef<THREE.LineSegments>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  // Filter visible voxels based on layer visibility
   const visibleVoxels = useMemo(() => {
     const visibleLayerIds = new Set(layers.filter(l => l.visible).map(l => l.id));
     return voxels.filter(v => visibleLayerIds.has(v.layerId));
@@ -45,16 +43,14 @@ function VoxelInstances() {
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      // Determine color based on material or state
       let color: string;
       if (selectedIds.includes(v.id)) {
-        color = '#ffffff';
+        color = '#58a6ff';
       } else if (v.isSupport) {
-        color = '#00e5ff'; // Cyan for support points
+        color = '#00e5ff';
       } else if (v.externalLoad && (v.externalLoad.x !== 0 || v.externalLoad.y !== 0 || v.externalLoad.z !== 0)) {
-        color = '#ff4081'; // Pink for load points
+        color = '#ff4081';
       } else {
-        // Use material-specific color
         const matColor = MATERIAL_COLORS[v.materialId || ''];
         color = matColor ? matColor.color : v.color;
       }
@@ -65,21 +61,16 @@ function VoxelInstances() {
     mesh.count = visibleVoxels.length;
   }, [visibleVoxels, selectedIds, dummy]);
 
-  // Wireframe edges overlay
+  // Wireframe edges
   const edgesGeo = useMemo(() => {
     if (viewMode !== 'wireframe' || visibleVoxels.length === 0) return null;
     const positions: number[] = [];
     const box = new THREE.BoxGeometry(0.95, 0.95, 0.95);
     const edges = new THREE.EdgesGeometry(box);
-    const edgePositions = edges.getAttribute('position').array;
-
+    const edgePos = edges.getAttribute('position').array;
     for (const v of visibleVoxels) {
-      for (let j = 0; j < edgePositions.length; j += 3) {
-        positions.push(
-          edgePositions[j] + v.pos.x,
-          edgePositions[j + 1] + v.pos.y,
-          edgePositions[j + 2] + v.pos.z
-        );
+      for (let j = 0; j < edgePos.length; j += 3) {
+        positions.push(edgePos[j] + v.pos.x, edgePos[j + 1] + v.pos.y, edgePos[j + 2] + v.pos.z);
       }
     }
     const geo = new THREE.BufferGeometry();
@@ -106,6 +97,114 @@ function VoxelInstances() {
       )}
     </group>
   );
+}
+
+/* ============================================================
+   Selection Outline (blue wireframe boxes around selected voxels)
+   ============================================================ */
+function SelectionOutline() {
+  const selectedIds = useStore(s => s.selectedVoxelIds);
+  const voxels = useStore(s => s.voxels);
+
+  const selectedVoxels = useMemo(() =>
+    voxels.filter(v => selectedIds.includes(v.id)),
+    [voxels, selectedIds]
+  );
+
+  // Animated pulse
+  const groupRef = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+    const pulse = 0.85 + 0.15 * Math.sin(clock.getElapsedTime() * 3);
+    groupRef.current.children.forEach(child => {
+      if (child instanceof THREE.Mesh) {
+        (child.material as THREE.MeshBasicMaterial).opacity = 0.3 + 0.3 * pulse;
+      }
+    });
+  });
+
+  if (selectedVoxels.length === 0) return null;
+
+  return (
+    <group ref={groupRef}>
+      {selectedVoxels.map(v => (
+        <mesh key={`sel_${v.id}`} position={[v.pos.x, v.pos.y, v.pos.z]}>
+          <boxGeometry args={[1.05, 1.05, 1.05]} />
+          <meshBasicMaterial color="#58a6ff" wireframe transparent opacity={0.5} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/* ============================================================
+   Box Selection (drag to select multiple voxels)
+   ============================================================ */
+function BoxSelection() {
+  const tool = useStore(s => s.activeTool);
+  const voxels = useStore(s => s.voxels);
+  const selectVoxels = useStore(s => s.selectVoxels);
+  const selectedVoxelIds = useStore(s => s.selectedVoxelIds);
+  const { camera, gl, size } = useThree();
+  const [isDragging, setIsDragging] = useState(false);
+  const startPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (tool !== 'select') return;
+    const canvas = gl.domElement;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      startPos.current = { x: e.clientX, y: e.clientY };
+      setIsDragging(false);
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (e.buttons !== 1) return;
+      const dx = Math.abs(e.clientX - startPos.current.x);
+      const dy = Math.abs(e.clientY - startPos.current.y);
+      if (dx > 5 || dy > 5) {
+        setIsDragging(true);
+      }
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (!isDragging) return;
+      setIsDragging(false);
+
+      // Calculate selection box in NDC
+      const rect = canvas.getBoundingClientRect();
+      const x1 = ((Math.min(startPos.current.x, e.clientX) - rect.left) / rect.width) * 2 - 1;
+      const y1 = -((Math.min(startPos.current.y, e.clientY) - rect.top) / rect.height) * 2 + 1;
+      const x2 = ((Math.max(startPos.current.x, e.clientX) - rect.left) / rect.width) * 2 - 1;
+      const y2 = -((Math.max(startPos.current.y, e.clientY) - rect.top) / rect.height) * 2 + 1;
+
+      // Project each voxel to screen and check if inside box
+      const selected: string[] = e.shiftKey ? [...selectedVoxelIds] : [];
+      const vec = new THREE.Vector3();
+
+      for (const v of voxels) {
+        vec.set(v.pos.x, v.pos.y, v.pos.z);
+        vec.project(camera);
+        if (vec.x >= x1 && vec.x <= x2 && vec.y >= y2 && vec.y <= y1 && vec.z > 0 && vec.z < 1) {
+          if (!selected.includes(v.id)) selected.push(v.id);
+        }
+      }
+      selectVoxels(selected);
+    };
+
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup', onMouseUp);
+    return () => {
+      canvas.removeEventListener('mousedown', onMouseDown);
+      canvas.removeEventListener('mousemove', onMouseMove);
+      canvas.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [tool, voxels, camera, gl, isDragging, selectVoxels, selectedVoxelIds]);
+
+  return null;
 }
 
 /* ============================================================
@@ -138,7 +237,6 @@ function StressOverlay() {
         r = 1.0; g = 1.0 - t; b = 0;
       }
       colors.push(r, g, b, r, g, b);
-
       if (edge.stressRatio > 0.8) danger.push(ei);
     }
 
@@ -182,17 +280,19 @@ function StressOverlay() {
 }
 
 /* ============================================================
-   Glue Joint Visualization
+   Glue Joint Visualization (gold discs + dashed lines)
    ============================================================ */
 function GlueJointViz() {
-  const [joints, setJoints] = useState<{ a: THREE.Vector3; b: THREE.Vector3; type: string }[]>([]);
+  const [joints, setJoints] = useState<{ id: string; a: THREE.Vector3; b: THREE.Vector3; type: string; strength: number }[]>([]);
 
   useEffect(() => {
     const onAdd = (data: any) => {
       setJoints(prev => [...prev, {
+        id: data.id || `gj_${Date.now()}`,
         a: new THREE.Vector3(data.voxelA.x, data.voxelA.y, data.voxelA.z),
         b: new THREE.Vector3(data.voxelB.x, data.voxelB.y, data.voxelB.z),
         type: data.type || 'rigid',
+        strength: data.strength || 1.0,
       }]);
     };
     const onRemove = (data: any) => {
@@ -201,23 +301,53 @@ function GlueJointViz() {
           j.b.x === data.voxelB.x && j.b.y === data.voxelB.y && j.b.z === data.voxelB.z)
       ));
     };
+    const onClear = () => setJoints([]);
     eventBus.on('glue:add', onAdd);
     eventBus.on('glue:remove', onRemove);
-    return () => { eventBus.off('glue:add', onAdd); eventBus.off('glue:remove', onRemove); };
+    eventBus.on('glue:clear', onClear);
+    return () => { eventBus.off('glue:add', onAdd); eventBus.off('glue:remove', onRemove); eventBus.off('glue:clear', onClear); };
   }, []);
 
+  // Animated glow for joints
+  const groupRef = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+    const glow = 0.6 + 0.4 * Math.sin(clock.getElapsedTime() * 2);
+    groupRef.current.children.forEach(child => {
+      child.traverse(obj => {
+        if (obj instanceof THREE.Mesh && (obj.material as THREE.MeshBasicMaterial).color) {
+          (obj.material as THREE.MeshBasicMaterial).opacity = glow * 0.8;
+        }
+      });
+    });
+  });
+
   return (
-    <group>
+    <group ref={groupRef}>
       {joints.map((j, i) => {
         const mid = j.a.clone().add(j.b).multiplyScalar(0.5);
-        const color = j.type === 'rigid' ? '#00ff88' : j.type === 'hinge' ? '#ffaa00' : '#88aaff';
+        const dir = j.b.clone().sub(j.a).normalize();
+        const color = j.type === 'rigid' ? '#ffd700' : j.type === 'hinge' ? '#ff8c00' : '#87ceeb';
+        const discSize = 0.1 + j.strength * 0.15;
+
         return (
           <group key={`glue_${i}`}>
-            <Line points={[j.a.toArray(), j.b.toArray()]} color={color} lineWidth={4} dashed dashSize={0.1} gapSize={0.05} />
+            {/* Dashed connection line */}
+            <Line points={[j.a.toArray(), j.b.toArray()]} color={color} lineWidth={3} dashed dashSize={0.1} gapSize={0.05} />
+            {/* Gold disc at midpoint */}
             <mesh position={mid}>
-              <sphereGeometry args={[0.08, 8, 8]} />
-              <meshBasicMaterial color={color} />
+              <sphereGeometry args={[discSize, 12, 12]} />
+              <meshBasicMaterial color={color} transparent opacity={0.7} />
             </mesh>
+            {/* Type label */}
+            <Html position={[mid.x, mid.y + 0.3, mid.z]} center style={{ pointerEvents: 'none' }}>
+              <div style={{
+                fontSize: 8, color, background: 'rgba(0,0,0,0.7)', padding: '1px 4px',
+                borderRadius: 3, border: `1px solid ${color}33`, whiteSpace: 'nowrap',
+              }}>
+                {j.type}
+              </div>
+            </Html>
           </group>
         );
       })}
@@ -233,21 +363,15 @@ function MeasurementViz() {
   const [points, setPoints] = useState<THREE.Vector3[]>([]);
   const [measurements, setMeasurements] = useState<{ points: THREE.Vector3[]; distance: number; label: string }[]>([]);
 
-  // Listen for measurement clicks
   useEffect(() => {
-    if (tool !== 'measure') {
-      setPoints([]);
-      return;
-    }
+    if (tool !== 'measure') { setPoints([]); return; }
     const handler = (data: { point: THREE.Vector3 }) => {
       setPoints(prev => {
         const next = [...prev, data.point];
         if (next.length === 2) {
           const dist = next[0].distanceTo(next[1]);
           setMeasurements(prev => [...prev, {
-            points: next,
-            distance: dist,
-            label: `${dist.toFixed(2)} u`,
+            points: next, distance: dist, label: `${dist.toFixed(2)} 格`,
           }]);
           return [];
         }
@@ -258,23 +382,38 @@ function MeasurementViz() {
     return () => { eventBus.off('measure:point', handler); };
   }, [tool]);
 
+  // Clear measurements event
+  useEffect(() => {
+    const onClear = () => { setMeasurements([]); setPoints([]); };
+    eventBus.on('measure:clear', onClear);
+    return () => { eventBus.off('measure:clear', onClear); };
+  }, []);
+
   return (
     <group>
-      {/* Active measurement points */}
       {points.map((p, i) => (
         <mesh key={`mp_${i}`} position={p}>
-          <sphereGeometry args={[0.12, 8, 8]} />
+          <sphereGeometry args={[0.1, 8, 8]} />
           <meshBasicMaterial color="#ffff00" />
         </mesh>
       ))}
-      {/* Completed measurements */}
       {measurements.map((m, i) => {
         const mid = m.points[0].clone().add(m.points[1]).multiplyScalar(0.5);
         return (
           <group key={`meas_${i}`}>
-            <Line points={[m.points[0].toArray(), m.points[1].toArray()]} color="#ffff00" lineWidth={2} />
-            <Html position={[mid.x, mid.y + 0.3, mid.z]} center style={{ pointerEvents: 'none' }}>
-              <div className="measure-label">{m.label}</div>
+            <Line points={[m.points[0].toArray(), m.points[1].toArray()]} color="#ffffff" lineWidth={2} dashed dashSize={0.15} gapSize={0.08} />
+            {/* Endpoint markers */}
+            <mesh position={m.points[0]}><sphereGeometry args={[0.06, 8, 8]} /><meshBasicMaterial color="#ffffff" /></mesh>
+            <mesh position={m.points[1]}><sphereGeometry args={[0.06, 8, 8]} /><meshBasicMaterial color="#ffffff" /></mesh>
+            {/* Distance label */}
+            <Html position={[mid.x, mid.y + 0.4, mid.z]} center style={{ pointerEvents: 'none' }}>
+              <div style={{
+                background: 'rgba(255,255,255,0.95)', color: '#000', padding: '2px 8px',
+                borderRadius: 4, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}>
+                {m.label}
+              </div>
             </Html>
           </group>
         );
@@ -294,10 +433,7 @@ function PipelineResultViz() {
 
   useEffect(() => {
     if (pipeline.status !== 'done') {
-      setMeshGeo(null);
-      setNurbsGeo(null);
-      setFeatureLines([]);
-      return;
+      setMeshGeo(null); setNurbsGeo(null); setFeatureLines([]); return;
     }
     const result = getLatestPipelineResult();
     if (!result) return;
@@ -389,10 +525,7 @@ function FirstPersonControls() {
       keys.current.add(e.code.toLowerCase());
       if (e.code === 'Escape') document.exitPointerLock();
     };
-
-    const onKeyUp = (e: KeyboardEvent) => {
-      keys.current.delete(e.code.toLowerCase());
-    };
+    const onKeyUp = (e: KeyboardEvent) => { keys.current.delete(e.code.toLowerCase()); };
 
     canvas.requestPointerLock();
     document.addEventListener('pointerlockchange', onPointerLockChange);
@@ -469,7 +602,7 @@ function PerfMonitor() {
 }
 
 /* ============================================================
-   Click Handler (voxel placement, support/load, material, measure)
+   Click Handler (voxel placement, support/load, material, measure, glue)
    ============================================================ */
 function ClickHandler() {
   const tool = useStore(s => s.activeTool);
@@ -488,6 +621,9 @@ function ClickHandler() {
   const voxels = useStore(s => s.voxels);
   const addLog = useStore(s => s.addLog);
 
+  // Glue tool state
+  const glueFirstVoxel = useRef<{ x: number; y: number; z: number } | null>(null);
+
   const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (!e.point) return;
@@ -502,9 +638,22 @@ function ClickHandler() {
       return;
     }
 
+    if (tool === 'glue' && clickedVoxel) {
+      if (!glueFirstVoxel.current) {
+        glueFirstVoxel.current = { ...clickedVoxel.pos };
+        addLog('info', 'Glue', `選擇第一個體素 (${clickedVoxel.pos.x},${clickedVoxel.pos.y},${clickedVoxel.pos.z})，請點擊第二個`);
+      } else {
+        const a = glueFirstVoxel.current;
+        const b = { ...clickedVoxel.pos };
+        eventBus.emit('glue:add', { voxelA: a, voxelB: b, type: 'rigid', strength: 1.0 });
+        addLog('success', 'Glue', `黏合 (${a.x},${a.y},${a.z}) ↔ (${b.x},${b.y},${b.z})`);
+        glueFirstVoxel.current = null;
+      }
+      return;
+    }
+
     if (tool === 'select' && clickedVoxel) {
       if (e.nativeEvent.shiftKey) {
-        // Multi-select with Shift
         const newIds = selectedVoxelIds.includes(clickedVoxel.id)
           ? selectedVoxelIds.filter(id => id !== clickedVoxel.id)
           : [...selectedVoxelIds, clickedVoxel.id];
@@ -530,6 +679,9 @@ function ClickHandler() {
       removeVoxel(clickedVoxel.id);
       voxelEngine.removeVoxel(clickedVoxel.pos);
       addLog('info', 'Voxel', `刪除 (${pos.x},${pos.y},${pos.z})`);
+    } else if (tool === 'paint' && clickedVoxel) {
+      updateVoxel(clickedVoxel.id, { color });
+      addLog('info', 'Paint', `上色 (${pos.x},${pos.y},${pos.z}) → ${color}`);
     } else if (tool === 'brush') {
       const placed = voxelEngine.brushPlace(pos, bSize, bShape, color, layerId);
       placed.forEach(v => addVoxel(v));
@@ -591,72 +743,31 @@ function LightingSystem() {
 
   return (
     <group>
-      {/* Ambient fill */}
-      <ambientLight intensity={0.15} color="#b0b8d0" />
-
-      {/* Key light - warm directional */}
+      <ambientLight intensity={0.6} color="#ffffff" />
       <directionalLight
-        position={[15, 25, 10]}
+        position={[50, 100, 50]}
         intensity={1.2}
-        color="#fff5e6"
+        color="#fff5e0"
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
-        shadow-camera-far={80}
-        shadow-camera-left={-20}
-        shadow-camera-right={20}
-        shadow-camera-top={20}
-        shadow-camera-bottom={-20}
-        shadow-bias={-0.001}
+        shadow-camera-near={0.5}
+        shadow-camera-far={500}
+        shadow-camera-left={-100}
+        shadow-camera-right={100}
+        shadow-camera-top={100}
+        shadow-camera-bottom={-100}
       />
-
-      {/* Fill light - cool blue */}
-      <directionalLight position={[-10, 15, -8]} intensity={0.4} color="#c0d0ff" />
-
-      {/* Rim / back light */}
-      <directionalLight position={[0, 10, -15]} intensity={0.3} color="#e0e8ff" />
-
-      {/* Hemisphere light for natural sky/ground bounce */}
-      <hemisphereLight args={['#87CEEB', '#2a2a3e', 0.35]} />
-
-      {/* Point light for local highlight */}
-      <pointLight position={[0, 8, 0]} intensity={0.3} color="#ffffff" distance={30} decay={2} />
-
-      {/* Contact shadows on ground */}
+      <directionalLight position={[-50, 20, -50]} intensity={0.4} color="#8ab4f8" />
+      <hemisphereLight args={['#87ceeb', '#8b7355', 0.3]} />
       <ContactShadows
         position={[0, -0.49, 0]}
-        opacity={0.4}
-        scale={40}
-        blur={2}
-        far={20}
+        opacity={0.35}
+        scale={60}
+        blur={2.5}
+        far={30}
         color="#000000"
       />
-    </group>
-  );
-}
-
-/* ============================================================
-   Selection Box Indicator
-   ============================================================ */
-function SelectionIndicator() {
-  const selectedIds = useStore(s => s.selectedVoxelIds);
-  const voxels = useStore(s => s.voxels);
-
-  const selectedVoxels = useMemo(() =>
-    voxels.filter(v => selectedIds.includes(v.id)),
-    [voxels, selectedIds]
-  );
-
-  if (selectedVoxels.length === 0) return null;
-
-  return (
-    <group>
-      {selectedVoxels.map(v => (
-        <mesh key={`sel_${v.id}`} position={[v.pos.x, v.pos.y, v.pos.z]}>
-          <boxGeometry args={[1.02, 1.02, 1.02]} />
-          <meshBasicMaterial color="#638cff" wireframe transparent opacity={0.5} />
-        </mesh>
-      ))}
     </group>
   );
 }
@@ -695,8 +806,8 @@ export function ViewportScene({ label }: { label?: string }) {
         <div style={{
           position: 'absolute', top: 8, right: 8, zIndex: 10,
           padding: '3px 8px', borderRadius: 4,
-          background: 'rgba(99,140,255,0.15)', border: '1px solid rgba(99,140,255,0.3)',
-          fontSize: 10, color: '#638cff',
+          background: 'rgba(88,166,255,0.15)', border: '1px solid rgba(88,166,255,0.3)',
+          fontSize: 10, color: '#58a6ff',
         }}>
           已選取 {selectedCount} 個體素
         </div>
@@ -712,30 +823,26 @@ export function ViewportScene({ label }: { label?: string }) {
 
       <Canvas
         gl={{ antialias: true, alpha: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true }}
-        style={{ background: '#0a0a0f' }}
-        shadows
+        style={{ background: '#0d1117' }}
+        shadows={{ type: THREE.PCFSoftShadowMap }}
         dpr={[1, 2]}
       >
         {camType === 'perspective'
           ? <PerspectiveCamera makeDefault position={[15, 12, 15]} fov={50} near={0.1} far={500} />
           : <OrthographicCamera makeDefault position={[15, 12, 15]} zoom={20} near={-500} far={500} />}
 
-        {/* Complete Lighting System */}
         <LightingSystem />
 
-        {/* Grid */}
         {showGrid && (
           <Grid args={[100, 100]} cellSize={1} cellThickness={0.5} cellColor="#1a1a2e"
             sectionSize={5} sectionThickness={1} sectionColor="#252540" fadeDistance={80} infiniteGrid />
         )}
 
-        {/* Axes */}
         {showAxes && (
           <group>
             <Line points={[[0,0,0],[10,0,0]]} color="#ff4757" lineWidth={2} />
             <Line points={[[0,0,0],[0,10,0]]} color="#3dd68c" lineWidth={2} />
             <Line points={[[0,0,0],[0,0,10]]} color="#638cff" lineWidth={2} />
-            {/* Axis labels */}
             <Html position={[10.5, 0, 0]} center style={{ pointerEvents: 'none' }}>
               <span style={{ color: '#ff4757', fontSize: 10, fontWeight: 'bold' }}>X</span>
             </Html>
@@ -748,14 +855,15 @@ export function ViewportScene({ label }: { label?: string }) {
           </group>
         )}
 
-        {/* Ground plane (subtle) */}
+        {/* Ground plane */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]} receiveShadow>
           <planeGeometry args={[100, 100]} />
           <meshStandardMaterial color="#0e0e16" roughness={0.95} metalness={0} transparent opacity={0.5} />
         </mesh>
 
         <VoxelInstances />
-        <SelectionIndicator />
+        <SelectionOutline />
+        <BoxSelection />
         <StressOverlay />
         <GlueJointViz />
         <MeasurementViz />
@@ -765,11 +873,19 @@ export function ViewportScene({ label }: { label?: string }) {
         {!fpMode && <OrbitControls makeDefault enableDamping dampingFactor={0.1} />}
         <FirstPersonControls />
 
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport labelColor="white" axisHeadScale={0.8} />
+        {/* GizmoViewcube - click faces to change view */}
+        <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+          <GizmoViewcube
+            color="#21262d"
+            strokeColor="#58a6ff"
+            textColor="#e6edf3"
+            opacity={0.9}
+            hoverColor="#30363d"
+          />
         </GizmoHelper>
+
         <PerfMonitor />
-        <fog attach="fog" args={['#0a0a0f', 60, 150]} />
+        <fog attach="fog" args={['#0d1117', 80, 200]} />
       </Canvas>
     </div>
   );
