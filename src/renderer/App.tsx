@@ -30,6 +30,7 @@ import { MaterialEditor } from './components/panels/MaterialEditor';
 import { IntegrityCheck } from './components/panels/IntegrityCheck';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { VoxelSearch } from './components/panels/VoxelSearch';
+import { QuickStartOverlay } from './components/QuickStartOverlay';
 
 type RightTab = 'layers' | 'texture' | 'load';
 
@@ -41,6 +42,9 @@ export default function App() {
   const [showLOD, setShowLOD] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => {
     return localStorage.getItem('fd-hide-welcome') !== 'true';
+  });
+  const [showQuickStart, setShowQuickStart] = useState(() => {
+    return localStorage.getItem('fd-hide-quickstart') !== 'true';
   });
   const pipeline = useStore(s => s.pipeline);
   const voxels = useStore(s => s.voxels);
@@ -129,7 +133,7 @@ export default function App() {
 
   // ─── Init + Demo voxels + Auto-save ───
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.9 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v2.0 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
     addLog('info', 'System', '30+ 指令可用：BOX/SPHERE/CYLINDER/COPY/MOVE/MIRROR/ROTATE/SELECT/MATERIAL/COLOR...');
@@ -199,7 +203,33 @@ export default function App() {
       addVoxel(v); voxelEngine.addVoxel(v);
     }
 
-    addLog('success', 'Demo', `已載入示範結構: ${c} 個體素（混凝土=灰, 鋼=銀, 磚=紅棕, 木=棕）`);
+    // Auto-create Glue Joints between adjacent voxels in demo
+    const demoVoxels = useStore.getState().voxels;
+    let glueCount = 0;
+    const dirs = [{x:1,y:0,z:0},{x:-1,y:0,z:0},{x:0,y:1,z:0},{x:0,y:-1,z:0},{x:0,y:0,z:1},{x:0,y:0,z:-1}];
+    const posSet = new Set(demoVoxels.map(v => `${v.pos.x},${v.pos.y},${v.pos.z}`));
+    const glueSet = new Set<string>();
+    for (const v of demoVoxels) {
+      for (const d of dirs) {
+        const nx = v.pos.x + d.x, ny = v.pos.y + d.y, nz = v.pos.z + d.z;
+        const nKey = `${nx},${ny},${nz}`;
+        if (posSet.has(nKey)) {
+          const pairKey = [v.pos.x,v.pos.y,v.pos.z,nx,ny,nz].sort().join(',');
+          if (!glueSet.has(pairKey)) {
+            glueSet.add(pairKey);
+            addGlueJoint({
+              id: `dg_${glueCount++}`,
+              voxelA: { ...v.pos },
+              voxelB: { x: nx, y: ny, z: nz },
+              type: 'rigid', strength: 1.0,
+            });
+          }
+        }
+      }
+    }
+
+    addLog('success', 'Demo', `已載入示範結構: ${c} 個體素, ${glueCount} 個黏合接頭`);
+    addLog('info', 'Demo', '提示：執行 ANALYZE 查看 FEA 應力分析結果');
 
     return () => { projectManager.stopAutoSave(); };
   }, []);
@@ -411,6 +441,11 @@ export default function App() {
         </div>
       </div>
       <StatusBar />
+
+      {/* Quick Start Overlay */}
+      {showQuickStart && !showWelcome && (
+        <QuickStartOverlay onClose={() => setShowQuickStart(false)} />
+      )}
 
       {/* Dialogs */}
       <ContextMenu />

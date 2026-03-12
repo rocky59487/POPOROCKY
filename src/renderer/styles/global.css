@@ -831,3 +831,82 @@ input:focus, select:focus, textarea:focus {
   animation: fadeIn 0.3s ease;
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ─── QuickStart Overlay ─── */
+.quickstart-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 0.3s ease;
+}
+.quickstart-card {
+  background: var(--bg-elevated); border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg); padding: 28px 32px;
+  width: 420px; max-width: 90vw; position: relative;
+  box-shadow: var(--shadow-lg), var(--shadow-glow);
+}
+.quickstart-close {
+  position: absolute; top: 12px; right: 12px;
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; padding: 4px; border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+.quickstart-close:hover { color: var(--text-primary); background: var(--bg-button-hover); }
+.quickstart-title {
+  font-size: 18px; font-weight: 700; color: var(--text-primary);
+  margin-bottom: 20px; text-align: center;
+  background: linear-gradient(135deg, var(--accent), var(--success));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.quickstart-sections { display: flex; flex-direction: column; gap: 16px; }
+.quickstart-section {
+  display: flex; gap: 12px; padding: 12px;
+  background: var(--bg-surface); border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.quickstart-section-icon {
+  color: var(--accent); flex-shrink: 0; padding-top: 2px;
+}
+.quickstart-section-content { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.quickstart-row {
+  display: flex; align-items: center; gap: 12px; font-size: var(--font-sm);
+}
+.quickstart-row kbd {
+  display: inline-block; min-width: 80px; padding: 2px 8px;
+  background: var(--bg-base); border: 1px solid var(--border);
+  border-radius: 3px; font-family: var(--font-mono); font-size: var(--font-xs);
+  color: var(--accent); text-align: center;
+}
+.quickstart-row span { color: var(--text-secondary); }
+.quickstart-hint {
+  font-size: var(--font-xs); color: var(--text-muted); padding-left: 4px;
+}
+.quickstart-hint code {
+  background: var(--bg-base); padding: 1px 6px; border-radius: 3px;
+  font-family: var(--font-mono); color: var(--success); font-size: var(--font-xs);
+}
+.quickstart-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);
+}
+.quickstart-checkbox {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--font-xs); color: var(--text-muted); cursor: pointer;
+}
+.quickstart-checkbox input { accent-color: var(--accent); }
+.quickstart-btn {
+  padding: 8px 24px; background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius-sm); font-size: var(--font-sm);
+  font-weight: 600; cursor: pointer; transition: all var(--transition-fast);
+}
+.quickstart-btn:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
+
+/* ─── Final UI Consistency ─── */
+.panel-header .panel-icon { margin-right: 6px; color: var(--accent); opacity: 0.7; }
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 2px rgba(99,140,255,0.15) !important;
+}
+button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}

@@ -211,6 +211,7 @@ function BoxSelection() {
 
 /* ============================================================
    FEA Stress Overlay (LineSegments) with flashing animation
+   depthTest: false ensures visibility over voxels
    ============================================================ */
 function StressOverlay() {
   const feaResult = useStore(s => s.loadAnalysis.result);
@@ -226,17 +227,29 @@ function StressOverlay() {
 
     for (let ei = 0; ei < feaResult.edges.length; ei++) {
       const edge = feaResult.edges[ei];
-      positions.push(edge.nodeA.x, edge.nodeA.y, edge.nodeA.z);
-      positions.push(edge.nodeB.x, edge.nodeB.y, edge.nodeB.z);
+      // Offset slightly outward so lines are visible above voxel surfaces
+      const ax = edge.nodeA.x, ay = edge.nodeA.y, az = edge.nodeA.z;
+      const bx = edge.nodeB.x, by = edge.nodeB.y, bz = edge.nodeB.z;
+      positions.push(ax, ay, az);
+      positions.push(bx, by, bz);
 
       const ratio = Math.min(edge.stressRatio, 1.5);
       let r: number, g: number, b: number;
       if (ratio <= 0.5) {
+        // Green to Yellow
         const t = ratio / 0.5;
         r = t; g = 1.0; b = 0;
+      } else if (ratio <= 0.8) {
+        // Yellow to Orange
+        const t = (ratio - 0.5) / 0.3;
+        r = 1.0; g = 1.0 - t * 0.5; b = 0;
+      } else if (ratio <= 1.0) {
+        // Orange to Red
+        const t = (ratio - 0.8) / 0.2;
+        r = 1.0; g = 0.5 - t * 0.5; b = 0;
       } else {
-        const t = Math.min((ratio - 0.5) / 0.5, 1.0);
-        r = 1.0; g = 1.0 - t; b = 0;
+        // Overloaded: bright red
+        r = 1.0; g = 0; b = 0;
       }
       colors.push(r, g, b, r, g, b);
       if (edge.stressRatio > 0.8) danger.push(ei);
@@ -275,8 +288,8 @@ function StressOverlay() {
 
   if (!geometry) return null;
   return (
-    <lineSegments ref={lineRef} geometry={geometry}>
-      <lineBasicMaterial vertexColors linewidth={2} transparent opacity={0.9} depthTest={false} />
+    <lineSegments ref={lineRef} geometry={geometry} renderOrder={999}>
+      <lineBasicMaterial vertexColors linewidth={2} transparent opacity={0.95} depthTest={false} depthWrite={false} />
     </lineSegments>
   );
 }
@@ -347,72 +360,73 @@ function ForceArrows() {
 }
 
 /* ============================================================
-   Glue Joint Visualization (gold discs + dashed lines)
+   Glue Joint Visualization (InstancedMesh for performance)
+   Uses instanced spheres at midpoints instead of individual meshes
    ============================================================ */
 function GlueJointViz() {
-  const [joints, setJoints] = useState<{ id: string; a: THREE.Vector3; b: THREE.Vector3; type: string; strength: number }[]>([]);
+  const glueJoints = useStore(s => s.glueJoints);
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const goldColor = useMemo(() => new THREE.Color('#ffd700'), []);
 
+  // Build line geometry for all joints at once
+  const lineGeo = useMemo(() => {
+    if (glueJoints.length === 0) return null;
+    const positions: number[] = [];
+    const colors: number[] = [];
+    for (const j of glueJoints) {
+      positions.push(j.voxelA.x, j.voxelA.y, j.voxelA.z);
+      positions.push(j.voxelB.x, j.voxelB.y, j.voxelB.z);
+      const c = j.type === 'rigid' ? [1, 0.843, 0] : j.type === 'hinge' ? [1, 0.549, 0] : [0.529, 0.808, 0.922];
+      colors.push(...c, ...c);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    return geo;
+  }, [glueJoints]);
+
+  // Update instanced mesh positions
   useEffect(() => {
-    const onAdd = (data: any) => {
-      setJoints(prev => [...prev, {
-        id: data.id || `gj_${Date.now()}`,
-        a: new THREE.Vector3(data.voxelA.x, data.voxelA.y, data.voxelA.z),
-        b: new THREE.Vector3(data.voxelB.x, data.voxelB.y, data.voxelB.z),
-        type: data.type || 'rigid',
-        strength: data.strength || 1.0,
-      }]);
-    };
-    const onRemove = (data: any) => {
-      setJoints(prev => prev.filter(j =>
-        !(j.a.x === data.voxelA.x && j.a.y === data.voxelA.y && j.a.z === data.voxelA.z &&
-          j.b.x === data.voxelB.x && j.b.y === data.voxelB.y && j.b.z === data.voxelB.z)
-      ));
-    };
-    const onClear = () => setJoints([]);
-    eventBus.on('glue:add', onAdd);
-    eventBus.on('glue:remove', onRemove);
-    eventBus.on('glue:clear', onClear);
-    return () => { eventBus.off('glue:add', onAdd); eventBus.off('glue:remove', onRemove); eventBus.off('glue:clear', onClear); };
-  }, []);
-
-  const groupRef = useRef<THREE.Group>(null);
-  useFrame(({ clock }) => {
-    if (!groupRef.current) return;
-    const glow = 0.6 + 0.4 * Math.sin(clock.getElapsedTime() * 2);
-    groupRef.current.children.forEach(child => {
-      child.traverse(obj => {
-        if (obj instanceof THREE.Mesh && (obj.material as THREE.MeshBasicMaterial).color) {
-          (obj.material as THREE.MeshBasicMaterial).opacity = glow * 0.8;
-        }
-      });
+    if (!meshRef.current || glueJoints.length === 0) return;
+    const mesh = meshRef.current;
+    glueJoints.forEach((j, i) => {
+      const mx = (j.voxelA.x + j.voxelB.x) / 2;
+      const my = (j.voxelA.y + j.voxelB.y) / 2;
+      const mz = (j.voxelA.z + j.voxelB.z) / 2;
+      dummy.position.set(mx, my, mz);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setColorAt(i, goldColor);
     });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.count = glueJoints.length;
+  }, [glueJoints, dummy, goldColor]);
+
+  // Pulsing animation
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+    const mat = meshRef.current.material as THREE.MeshBasicMaterial;
+    mat.opacity = 0.5 + 0.3 * Math.sin(clock.getElapsedTime() * 2);
   });
 
-  return (
-    <group ref={groupRef}>
-      {joints.map((j, i) => {
-        const mid = j.a.clone().add(j.b).multiplyScalar(0.5);
-        const color = j.type === 'rigid' ? '#ffd700' : j.type === 'hinge' ? '#ff8c00' : '#87ceeb';
-        const discSize = 0.1 + j.strength * 0.15;
+  if (glueJoints.length === 0) return null;
 
-        return (
-          <group key={`glue_${i}`}>
-            <Line points={[j.a.toArray(), j.b.toArray()]} color={color} lineWidth={3} dashed dashSize={0.1} gapSize={0.05} />
-            <mesh position={mid}>
-              <sphereGeometry args={[discSize, 12, 12]} />
-              <meshBasicMaterial color={color} transparent opacity={0.7} />
-            </mesh>
-            <Html position={[mid.x, mid.y + 0.3, mid.z]} center style={{ pointerEvents: 'none' }}>
-              <div style={{
-                fontSize: 8, color, background: 'rgba(0,0,0,0.7)', padding: '1px 4px',
-                borderRadius: 3, border: `1px solid ${color}33`, whiteSpace: 'nowrap',
-              }}>
-                {j.type}
-              </div>
-            </Html>
-          </group>
-        );
-      })}
+  return (
+    <group>
+      {/* Instanced spheres at joint midpoints */}
+      <instancedMesh ref={meshRef} args={[undefined, undefined, Math.max(glueJoints.length, 1)]} renderOrder={100}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+        <meshBasicMaterial color="#ffd700" transparent opacity={0.7} depthTest={false} />
+      </instancedMesh>
+      {/* Single LineSegments for all connections */}
+      {lineGeo && (
+        <lineSegments geometry={lineGeo} renderOrder={99}>
+          <lineBasicMaterial vertexColors transparent opacity={0.5} depthTest={false} />
+        </lineSegments>
+      )}
     </group>
   );
 }
