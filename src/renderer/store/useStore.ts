@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { voxelBuffer, VoxelBuffer } from '../engines/VoxelBuffer';
+import { spatialIndex } from '../engines/SpatialIndex';
 
 /* ============================================================
    Types
@@ -142,6 +144,10 @@ export interface AppState {
   // Performance
   fps: number; memoryUsage: number; triangleCount: number; drawCalls: number;
 
+  // VoxelBuffer (high-performance typed array storage)
+  voxelBufferRef: VoxelBuffer;
+  bufferVersion: number; // Incremented when buffer changes, triggers React re-render
+
   // Active voxel material for new voxels
   activeVoxelMaterial: string; // key into DEFAULT_MATERIALS
 
@@ -230,6 +236,15 @@ export interface AppState {
   // Bulk operations
   setVoxels: (voxels: Voxel[]) => void;
   setLayers: (layers: Layer[]) => void;
+
+  // VoxelBuffer actions
+  syncBufferVersion: () => void;
+  addVoxelToBuffer: (x: number, y: number, z: number, material: string, layerIndex?: number) => number;
+  removeVoxelFromBuffer: (x: number, y: number, z: number) => boolean;
+  clearBuffer: () => void;
+
+  // Async FEA
+  runFEAAsync: () => Promise<void>;
 }
 
 const defaultLayers: Layer[] = [
@@ -302,6 +317,8 @@ export const useStore = create<AppState>()(
     lastSaveTime: Date.now(),
     isDirty: false,
     glueJoints: [],
+    voxelBufferRef: voxelBuffer,
+    bufferVersion: 0,
 
     setTool: (tool) => set((s) => { s.activeTool = tool; }),
     setViewLayout: (l) => set((s) => { s.viewLayout = l; }),
@@ -446,5 +463,130 @@ export const useStore = create<AppState>()(
 
     setVoxels: (voxels) => set((s) => { s.voxels = voxels as any; }),
     setLayers: (layers) => set((s) => { s.layers = layers as any; }),
+
+    // VoxelBuffer actions
+    syncBufferVersion: () => set((s) => { s.bufferVersion = voxelBuffer.version; }),
+    addVoxelToBuffer: (x, y, z, material, layerIndex = 0) => {
+      const idx = voxelBuffer.addVoxel(x, y, z, material, undefined, undefined, undefined, layerIndex);
+      if (idx >= 0) {
+        spatialIndex.insert(idx, x, y, z);
+        // Also add to legacy voxels array for compatibility
+        const state = useStore.getState();
+        const id = `${x},${y},${z}`;
+        const matData = DEFAULT_MATERIALS[material] || DEFAULT_MATERIALS.concrete;
+        const colorMap: Record<string, string> = {
+          concrete: '#808080', steel: '#c0c0c0', wood: '#8B4513',
+          brick: '#8B3A3A', aluminum: '#D0D0E0', glass: '#88CCEE',
+        };
+        state.addVoxel({
+          id, pos: { x, y, z }, color: colorMap[material] || '#808080',
+          layerId: state.layers[layerIndex]?.id || 'default',
+          materialId: material, material: matData,
+          isSupport: false,
+        });
+      }
+      return idx;
+    },
+    removeVoxelFromBuffer: (x, y, z) => {
+      const idx = voxelBuffer.getIndex(x, y, z);
+      if (idx >= 0) {
+        spatialIndex.remove(idx, x, y, z);
+        voxelBuffer.removeVoxel(x, y, z);
+        // Also remove from legacy voxels array
+        const id = `${x},${y},${z}`;
+        useStore.getState().removeVoxel(id);
+        return true;
+      }
+      return false;
+    },
+    clearBuffer: () => {
+      voxelBuffer.clear();
+      spatialIndex.clear();
+      set((s) => { s.voxels = []; s.bufferVersion = voxelBuffer.version; });
+    },
+
+    // Async FEA using Web Worker
+    runFEAAsync: async () => {
+      const state = useStore.getState();
+      state.setFEAComputing(true);
+      try {
+        // Use inline worker-like computation for now (Comlink integration)
+        const snapshot = voxelBuffer.getTransferableSnapshot();
+        const glueJoints = state.glueJoints.map((gj: { voxelA: Vec3; voxelB: Vec3; strength: number }) => ({
+          voxelA: gj.voxelA, voxelB: gj.voxelB, strength: gj.strength,
+        }));
+
+        // Simple FEA computation (same as worker but inline for compatibility)
+        const { positions, materials, properties, flags, loads, count } = snapshot;
+        const posMap = new Map<string, number>();
+        for (let i = 0; i < count; i++) {
+          const i3 = i * 3;
+          posMap.set(`${Math.round(positions[i3])},${Math.round(positions[i3+1])},${Math.round(positions[i3+2])}`, i);
+        }
+
+        const edgeSet = new Set<string>();
+        const rawEdges: Array<{a: number; b: number; strength: number}> = [];
+        const offsets: [number,number,number][] = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+
+        for (let i = 0; i < count; i++) {
+          const i3 = i * 3;
+          const x = Math.round(positions[i3]), y = Math.round(positions[i3+1]), z = Math.round(positions[i3+2]);
+          for (const [dx,dy,dz] of offsets) {
+            const nIdx = posMap.get(`${x+dx},${y+dy},${z+dz}`);
+            if (nIdx !== undefined) {
+              const ek = i < nIdx ? `${i}-${nIdx}` : `${nIdx}-${i}`;
+              if (!edgeSet.has(ek)) { edgeSet.add(ek); rawEdges.push({a:i, b:nIdx, strength:1}); }
+            }
+          }
+        }
+
+        for (const gj of glueJoints) {
+          const aKey = `${Math.round(gj.voxelA.x)},${Math.round(gj.voxelA.y)},${Math.round(gj.voxelA.z)}`;
+          const bKey = `${Math.round(gj.voxelB.x)},${Math.round(gj.voxelB.y)},${Math.round(gj.voxelB.z)}`;
+          const aIdx = posMap.get(aKey), bIdx = posMap.get(bKey);
+          if (aIdx !== undefined && bIdx !== undefined) {
+            const ek = aIdx < bIdx ? `${aIdx}-${bIdx}` : `${bIdx}-${aIdx}`;
+            if (!edgeSet.has(ek)) { edgeSet.add(ek); rawEdges.push({a:aIdx, b:bIdx, strength:gj.strength}); }
+          }
+        }
+
+        const feaEdges: FEAEdge[] = [];
+        let maxSR = 0, danger = 0, overload = 0;
+        const gMag = state.loadAnalysis.gravityMagnitude;
+
+        for (const edge of rawEdges) {
+          const a3 = edge.a*3, b3 = edge.b*3, a4 = edge.a*4, b4 = edge.b*4;
+          const density = properties[a4+2] || 2400;
+          let force = density * gMag / 6 * edge.strength;
+          if (flags[edge.a] & 2) force += Math.sqrt(loads[a3]**2+loads[a3+1]**2+loads[a3+2]**2)/6;
+          if (flags[edge.b] & 2) force += Math.sqrt(loads[b3]**2+loads[b3+1]**2+loads[b3+2]**2)/6;
+          const dy = positions[b3+1] - positions[a3+1];
+          const isTension = dy > 0;
+          const maxS = isTension
+            ? Math.min(properties[a4+1], properties[b4+1]) * 1e6
+            : Math.min(properties[a4], properties[b4]) * 1e6;
+          const sr = maxS > 0 ? force / maxS : 0;
+          if (sr > maxSR) maxSR = sr;
+          if (sr > 0.8) danger++;
+          if (sr > 1.0) overload++;
+          feaEdges.push({
+            nodeA: {x:positions[a3], y:positions[a3+1], z:positions[a3+2]},
+            nodeB: {x:positions[b3], y:positions[b3+1], z:positions[b3+2]},
+            stress: force, stressRatio: sr, isTension,
+          });
+        }
+
+        state.setFEAResult({
+          edges: feaEdges, displacements: new Map(),
+          dangerCount: danger, maxStressRatio: maxSR, totalEdges: feaEdges.length,
+        });
+        state.addLog('success', 'FEA', `分析完成：${feaEdges.length} 條邊，最大應力比 ${maxSR.toFixed(3)}，${danger} 條危險邊`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        state.addLog('error', 'FEA', `分析失敗：${msg}`);
+      } finally {
+        state.setFEAComputing(false);
+      }
+    },
   }))
 );

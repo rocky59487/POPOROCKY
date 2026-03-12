@@ -33,7 +33,7 @@ export function WelcomeScreen({ onClose, onNewProject, onOpenProject, onShowTemp
             <Box size={48} strokeWidth={1.5} />
           </div>
           <h1 className="welcome-title">FastDesign</h1>
-          <p className="welcome-version">v2.1 — 次世代 3D 敏捷設計系統</p>
+          <p className="welcome-version">v2.2 — 次世代 3D 敏捷設計系統</p>
           <p className="welcome-subtitle">六大引擎 · AutoCAD 指令 · Minecraft 操作 · FEA 結構分析</p>
         </div>
 

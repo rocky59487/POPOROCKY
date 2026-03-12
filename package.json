@@ -23,6 +23,7 @@
     "@react-three/postprocessing": "^3.0.4",
     "bitecs": "^0.4.0",
     "cmdk": "^1.1.1",
+    "comlink": "^4.4.2",
     "electron": "^40.8.0",
     "fuse.js": "^7.1.0",
     "immer": "^11.1.4",

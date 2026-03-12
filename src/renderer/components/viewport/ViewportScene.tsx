@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useStore, Voxel, DEFAULT_MATERIALS } from '../../store/useStore';
 import { voxelEngine } from '../../engines/VoxelEngine';
 import { loadEngine } from '../../engines/LoadEngine';
+import { voxelBuffer } from '../../engines/VoxelBuffer';
 import { getLatestPipelineResult } from '../../pipeline/VoxelToNURBS';
 import eventBus from '../../engines/EventBus';
 import { GridSnapPreview } from './GridSnapPreview';
@@ -28,46 +29,57 @@ const ORTHO_CONFIGS: Record<string, { position: [number, number, number]; up: [n
 
 /* ============================================================
    Voxel Rendering (InstancedMesh) with Material Colors
+   Uses VoxelBuffer for high-performance data access
    ============================================================ */
 function VoxelInstances() {
   const voxels = useStore(s => s.voxels);
   const selectedIds = useStore(s => s.selectedVoxelIds);
   const viewMode = useStore(s => s.viewMode);
   const layers = useStore(s => s.layers);
+  const bufferVersion = useStore(s => s.bufferVersion);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const colorObj = useMemo(() => new THREE.Color(), []);
+  const lastVersion = useRef(-1);
 
   const visibleVoxels = useMemo(() => {
     const visibleLayerIds = new Set(layers.filter(l => l.visible).map(l => l.id));
     return voxels.filter(v => visibleLayerIds.has(v.layerId));
   }, [voxels, layers]);
 
-  useEffect(() => {
+  // Use useFrame for direct mutation - no React re-render needed for matrix/color updates
+  useFrame(() => {
     if (!meshRef.current || visibleVoxels.length === 0) return;
-    const mesh = meshRef.current;
+    // Only update when data actually changed
+    const currentVersion = voxelBuffer.version;
+    if (lastVersion.current === currentVersion && lastVersion.current !== -1) return;
+    lastVersion.current = currentVersion;
 
-    visibleVoxels.forEach((v, i) => {
+    const mesh = meshRef.current;
+    const selectedSet = new Set(selectedIds);
+
+    for (let i = 0; i < visibleVoxels.length; i++) {
+      const v = visibleVoxels[i];
       dummy.position.set(v.pos.x, v.pos.y, v.pos.z);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      let color: string;
-      if (selectedIds.includes(v.id)) {
-        color = '#58a6ff';
+      if (selectedSet.has(v.id)) {
+        colorObj.set('#58a6ff');
       } else if (v.isSupport) {
-        color = '#00e5ff';
+        colorObj.set('#00e5ff');
       } else if (v.externalLoad && (v.externalLoad.x !== 0 || v.externalLoad.y !== 0 || v.externalLoad.z !== 0)) {
-        color = '#ff4081';
+        colorObj.set('#ff4081');
       } else {
         const matColor = MATERIAL_COLORS[v.materialId || ''];
-        color = matColor ? matColor.color : v.color;
+        colorObj.set(matColor ? matColor.color : v.color);
       }
-      mesh.setColorAt(i, new THREE.Color(color));
-    });
+      mesh.setColorAt(i, colorObj);
+    }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.count = visibleVoxels.length;
-  }, [visibleVoxels, selectedIds, dummy]);
+  });
 
   // Wireframe edges
   const edgesGeo = useMemo(() => {
@@ -114,10 +126,10 @@ function SelectionOutline() {
   const selectedIds = useStore(s => s.selectedVoxelIds);
   const voxels = useStore(s => s.voxels);
 
-  const selectedVoxels = useMemo(() =>
-    voxels.filter(v => selectedIds.includes(v.id)),
-    [voxels, selectedIds]
-  );
+  const selectedVoxels = useMemo(() => {
+    const idSet = new Set(selectedIds);
+    return voxels.filter(v => idSet.has(v.id));
+  }, [voxels, selectedIds]);
 
   const groupRef = useRef<THREE.Group>(null);
   useFrame(({ clock }) => {

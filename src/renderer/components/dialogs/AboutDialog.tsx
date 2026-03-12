@@ -41,7 +41,7 @@ export function AboutDialog({ open, onClose }: Props) {
               次世代 3D 敏捷設計系統
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              版本 2.1.0 | Electron + React + Three.js
+              版本 2.2.0 | Electron + React + Three.js + VoxelBuffer
             </div>
           </div>
 

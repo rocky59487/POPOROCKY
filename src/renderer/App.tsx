@@ -136,8 +136,8 @@ export default function App() {
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
-    addLog('info', 'System', 'FastDesign v2.1 已啟動');
-    addLog('info', 'System', '六大引擎已初始化（體素/負載/圖層/多人/貼圖/LOD）');
+    addLog('info', 'System', 'FastDesign v2.2 已啟動');
+    addLog('info', 'System', '六大引擎已初始化 + VoxelBuffer 高性能架構');
     addLog('info', 'System', 'AutoCAD 風格指令列就緒 — 輸入 ` 或 : 聚焦');
     addLog('info', 'System', '40+ 指令：BOX/LINE/RECT/CIRCLE/DIST/AREA/VOLUME/ANALYZE...');
     addLog('info', 'System', 'Minecraft 風格操作：按 Tab 切換第一人稱模式');
