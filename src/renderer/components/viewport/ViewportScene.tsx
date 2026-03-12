@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Grid, GizmoHelper, GizmoViewcube, Line, PerspectiveCamera, OrthographicCamera, ContactShadows, Html, Environment } from '@react-three/drei';
 import * as THREE from 'three';
@@ -21,9 +21,9 @@ const MATERIAL_COLORS: Record<string, { color: string; roughness: number; metaln
 
 /* ─── Ortho camera direction configs ─── */
 const ORTHO_CONFIGS: Record<string, { position: [number, number, number]; up: [number, number, number] }> = {
-  top:   { position: [0, 80, 0],  up: [0, 0, -1] },
-  front: { position: [0, 0, 80],  up: [0, 1, 0] },
-  right: { position: [80, 0, 0],  up: [0, 1, 0] },
+  top:   { position: [0, 100, 0],   up: [0, 0, -1] },
+  front: { position: [0, 0, 100],   up: [0, 1, 0] },
+  right: { position: [100, 0, 0],   up: [0, 1, 0] },
 };
 
 /* ============================================================
@@ -560,21 +560,34 @@ function PipelineResultViz() {
 }
 
 /* ============================================================
-   First Person Controls (PointerLock + WASD)
+   First Person Controls (Minecraft-style: PointerLock + WASD + Raycaster)
+   Left click = destroy voxel, Right click = place voxel
    ============================================================ */
 function FirstPersonControls() {
   const fpMode = useStore(s => s.fpMode);
   const setFpMode = useStore(s => s.setFpMode);
-  const { camera, gl } = useThree();
+  const voxels = useStore(s => s.voxels);
+  const addVoxel = useStore(s => s.addVoxel);
+  const removeVoxel = useStore(s => s.removeVoxel);
+  const addLog = useStore(s => s.addLog);
+  const activeVoxelMaterial = useStore(s => s.activeVoxelMaterial);
+  const layerId = useStore(s => s.activeLayerId);
+  const color = useStore(s => s.paintColor);
+  const { camera, gl, scene } = useThree();
   const velocity = useRef(new THREE.Vector3());
   const direction = useRef(new THREE.Vector3());
   const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
   const keys = useRef<Set<string>>(new Set());
   const isLocked = useRef(false);
+  const raycaster = useRef(new THREE.Raycaster());
+  const highlightRef = useRef<THREE.Mesh | null>(null);
+  const previewRef = useRef<THREE.Mesh | null>(null);
+  const lastHitFace = useRef<{ pos: THREE.Vector3; normal: THREE.Vector3 } | null>(null);
 
   const SPEED = 8;
   const FAST_SPEED = 24;
   const MOUSE_SENSITIVITY = 0.002;
+  const REACH = 8;
 
   useEffect(() => {
     if (!fpMode) return;
@@ -600,23 +613,63 @@ function FirstPersonControls() {
     };
     const onKeyUp = (e: KeyboardEvent) => { keys.current.delete(e.code.toLowerCase()); };
 
+    // Left click = destroy, Right click = place
+    const onMouseDown = (e: MouseEvent) => {
+      if (!isLocked.current) return;
+      if (e.button === 0 && lastHitFace.current) {
+        // Destroy the voxel at the hit position
+        const hp = lastHitFace.current.pos;
+        const hitVoxel = voxels.find(v =>
+          Math.abs(v.pos.x - hp.x) < 0.6 && Math.abs(v.pos.y - hp.y) < 0.6 && Math.abs(v.pos.z - hp.z) < 0.6
+        );
+        if (hitVoxel) {
+          removeVoxel(hitVoxel.id);
+          addLog('info', 'FP', `破壞 (${hitVoxel.pos.x},${hitVoxel.pos.y},${hitVoxel.pos.z})`);
+        }
+      } else if (e.button === 2 && lastHitFace.current) {
+        // Place a new voxel on the face
+        const hp = lastHitFace.current.pos;
+        const n = lastHitFace.current.normal;
+        const pp = { x: Math.round(hp.x + n.x), y: Math.round(hp.y + n.y), z: Math.round(hp.z + n.z) };
+        const exists = voxels.find(v => v.pos.x === pp.x && v.pos.y === pp.y && v.pos.z === pp.z);
+        if (!exists) {
+          const matColors: Record<string, string> = { concrete: '#808080', steel: '#C0C0C0', wood: '#8B4513', brick: '#8B3A3A' };
+          const v: Voxel = {
+            id: `v_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+            pos: pp, color: matColors[activeVoxelMaterial] || color, layerId,
+            material: { ...(DEFAULT_MATERIALS[activeVoxelMaterial] || DEFAULT_MATERIALS.concrete) },
+            isSupport: false, materialId: activeVoxelMaterial,
+          };
+          addVoxel(v);
+          addLog('info', 'FP', `放置 (${pp.x},${pp.y},${pp.z})`);
+        }
+      }
+    };
+
+    // Prevent context menu in FP mode
+    const onContextMenu = (e: MouseEvent) => { e.preventDefault(); };
+
     canvas.requestPointerLock();
     document.addEventListener('pointerlockchange', onPointerLockChange);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('contextmenu', onContextMenu);
 
     return () => {
       document.removeEventListener('pointerlockchange', onPointerLockChange);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('contextmenu', onContextMenu);
       if (document.pointerLockElement === canvas) document.exitPointerLock();
       keys.current.clear();
     };
-  }, [fpMode, camera, gl, setFpMode]);
+  }, [fpMode, camera, gl, setFpMode, voxels, addVoxel, removeVoxel, addLog, activeVoxelMaterial, layerId, color]);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!fpMode || !isLocked.current) return;
     const speed = keys.current.has('shiftleft') || keys.current.has('shiftright') ? FAST_SPEED : SPEED;
     direction.current.set(0, 0, 0);
@@ -641,9 +694,51 @@ function FirstPersonControls() {
       velocity.current.y += direction.current.y * speed * delta;
       camera.position.add(velocity.current);
     }
+
+    // Raycast from camera center to detect voxels
+    raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
+    raycaster.current.far = REACH;
+    const meshes = scene.children.filter(c => c instanceof THREE.InstancedMesh || (c instanceof THREE.Group));
+    const intersects = raycaster.current.intersectObjects(scene.children, true);
+    const voxelHit = intersects.find(i => i.object instanceof THREE.InstancedMesh || (i.face && i.distance < REACH));
+
+    if (voxelHit && voxelHit.face) {
+      const hitPos = new THREE.Vector3(
+        Math.round(voxelHit.point.x - voxelHit.face.normal.x * 0.01),
+        Math.round(voxelHit.point.y - voxelHit.face.normal.y * 0.01),
+        Math.round(voxelHit.point.z - voxelHit.face.normal.z * 0.01)
+      );
+      lastHitFace.current = { pos: hitPos, normal: voxelHit.face.normal.clone() };
+    } else {
+      lastHitFace.current = null;
+    }
   });
 
-  return null;
+  if (!fpMode) return null;
+
+  // Render highlight box on hit voxel and preview box on adjacent face
+  return (
+    <group>
+      {lastHitFace.current && (
+        <>
+          {/* Highlight current voxel face */}
+          <mesh position={[lastHitFace.current.pos.x, lastHitFace.current.pos.y, lastHitFace.current.pos.z]}>
+            <boxGeometry args={[1.01, 1.01, 1.01]} />
+            <meshBasicMaterial color="#58a6ff" wireframe transparent opacity={0.6} />
+          </mesh>
+          {/* Preview placement position */}
+          <mesh position={[
+            Math.round(lastHitFace.current.pos.x + lastHitFace.current.normal.x),
+            Math.round(lastHitFace.current.pos.y + lastHitFace.current.normal.y),
+            Math.round(lastHitFace.current.pos.z + lastHitFace.current.normal.z),
+          ]}>
+            <boxGeometry args={[0.95, 0.95, 0.95]} />
+            <meshBasicMaterial color="#58a6ff" transparent opacity={0.25} />
+          </mesh>
+        </>
+      )}
+    </group>
+  );
 }
 
 /* ============================================================
@@ -929,7 +1024,7 @@ export function ViewportScene({ label, orthoDirection }: ViewportSceneProps) {
         dpr={[1, isOrthoView ? 1 : 2]}
       >
         {useOrtho
-          ? <OrthographicCamera makeDefault position={camPos} up={camUp} zoom={20} near={-500} far={500} />
+          ? <OrthographicCamera makeDefault position={camPos} up={camUp} zoom={15} near={-1000} far={1000} />
           : <PerspectiveCamera makeDefault position={camPos} fov={50} near={0.1} far={500} />}
 
         {/* For ortho views, set camera orientation after mount */}
@@ -998,6 +1093,7 @@ export function ViewportScene({ label, orthoDirection }: ViewportSceneProps) {
 
         {!isOrthoView && <PerfMonitor />}
         {!isOrthoView && <fog attach="fog" args={['#0d1117', 80, 200]} />}
+        {isOrthoView && <ambientLight intensity={0.6} />}
       </Canvas>
     </div>
   );

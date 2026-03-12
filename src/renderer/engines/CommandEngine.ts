@@ -848,6 +848,147 @@ class CommandEngine {
       },
     });
 
+    // ═══════════════ CAD-STYLE COMMANDS ═══════════════
+    this.reg({
+      name: 'LINE', aliases: ['L'], syntax: 'LINE (互動式)',
+      description: '繪製直線體素（互動式：指定兩點）',
+      category: 'voxel',
+      execute: (args) => {
+        if (args.length < 6) return { success: true, message: 'LINE 指令：請在指令列中輸入 LINE 啟動互動模式' };
+        const p1 = parseVec3(args, 0);
+        const p2 = parseVec3(args, 3);
+        if (!p1 || !p2) return { success: false, message: '參數錯誤' };
+        const s = store();
+        let count = 0;
+        const dx = p2.x - p1.x, dy = p2.y - p1.y, dz = p2.z - p1.z;
+        const steps = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz));
+        for (let i = 0; i <= steps; i++) {
+          const t = steps === 0 ? 0 : i / steps;
+          const pos = { x: Math.round(p1.x + dx * t), y: Math.round(p1.y + dy * t), z: Math.round(p1.z + dz * t) };
+          if (!s.voxels.find(v => v.pos.x === pos.x && v.pos.y === pos.y && v.pos.z === pos.z)) {
+            s.addVoxel({ id: `v_${Date.now()}_${count}`, pos, color: '#808080', layerId: s.activeLayerId, material: { maxCompression: 30, maxTension: 3, density: 2400, youngModulus: 25000 }, isSupport: false, materialId: s.activeVoxelMaterial });
+            count++;
+          }
+        }
+        return { success: true, message: `LINE: 建立 ${count} 個體素` };
+      },
+    });
+
+    this.reg({
+      name: 'RECT', aliases: ['RECTANGLE', 'REC'], syntax: 'RECT (互動式)',
+      description: '繪製矩形（互動式：指定兩個角點）',
+      category: 'voxel',
+      execute: () => {
+        return { success: true, message: 'RECT 指令：請在指令列中輸入 RECT 啟動互動模式' };
+      },
+    });
+
+    this.reg({
+      name: 'CIRCLE', aliases: ['C'], syntax: 'CIRCLE (互動式)',
+      description: '繪製圓形體素（互動式：指定圓心和半徑）',
+      category: 'voxel',
+      execute: () => {
+        return { success: true, message: 'CIRCLE 指令：請在指令列中輸入 CIRCLE 啟動互動模式' };
+      },
+    });
+
+    // ═══════════════ MEASUREMENT COMMANDS ═══════════════
+    this.reg({
+      name: 'DIST', aliases: ['DISTANCE', 'DI'], syntax: 'DIST x1 y1 z1 x2 y2 z2',
+      description: '測量兩點之間的距離',
+      category: 'analysis',
+      execute: (args) => {
+        if (args.length < 6) return { success: false, message: '用法: DIST x1 y1 z1 x2 y2 z2' };
+        const p1 = parseVec3(args, 0);
+        const p2 = parseVec3(args, 3);
+        if (!p1 || !p2) return { success: false, message: '參數錯誤' };
+        const dx = p2.x - p1.x, dy = p2.y - p1.y, dz = p2.z - p1.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return { success: true, message: `距離: ${dist.toFixed(3)} 格\n\u0394X=${dx.toFixed(1)} \u0394Y=${dy.toFixed(1)} \u0394Z=${dz.toFixed(1)}\n角度: ${(Math.atan2(dz, dx) * 180 / Math.PI).toFixed(1)}\u00b0` };
+      },
+    });
+
+    this.reg({
+      name: 'AREA', aliases: [], syntax: 'AREA',
+      description: '計算選取區域的表面積（體素面數）',
+      category: 'analysis',
+      execute: () => {
+        const s = store();
+        if (s.selectedVoxelIds.length === 0) return { success: false, message: '請先選取體素' };
+        const selected = s.voxels.filter(v => s.selectedVoxelIds.includes(v.id));
+        const posSet = new Set(selected.map(v => `${v.pos.x},${v.pos.y},${v.pos.z}`));
+        let exposedFaces = 0;
+        for (const v of selected) {
+          const dirs = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+          for (const [dx, dy, dz] of dirs) {
+            if (!posSet.has(`${v.pos.x+dx},${v.pos.y+dy},${v.pos.z+dz}`)) exposedFaces++;
+          }
+        }
+        return { success: true, message: `選取 ${selected.length} 個體素\n表面積: ${exposedFaces} 面 (${exposedFaces} m\u00b2)` };
+      },
+    });
+
+    this.reg({
+      name: 'VOLUME', aliases: ['VOL'], syntax: 'VOLUME',
+      description: '計算選取區域的體積',
+      category: 'analysis',
+      execute: () => {
+        const s = store();
+        if (s.selectedVoxelIds.length === 0) return { success: false, message: '請先選取體素' };
+        const selected = s.voxels.filter(v => s.selectedVoxelIds.includes(v.id));
+        const totalWeight = selected.reduce((sum, v) => sum + (v.material?.density || 2400), 0) / 1000;
+        return { success: true, message: `選取 ${selected.length} 個體素\n體積: ${selected.length} m\u00b3\n估計重量: ${totalWeight.toFixed(1)} 噸` };
+      },
+    });
+
+    this.reg({
+      name: 'LIST', aliases: ['LI'], syntax: 'LIST',
+      description: '列出選取體素的屬性',
+      category: 'analysis',
+      execute: () => {
+        const s = store();
+        if (s.selectedVoxelIds.length === 0) return { success: false, message: '請先選取體素' };
+        const selected = s.voxels.filter(v => s.selectedVoxelIds.includes(v.id));
+        const lines: string[] = [`已選取 ${selected.length} 個體素：`];
+        for (const v of selected.slice(0, 10)) {
+          lines.push(`  (${v.pos.x},${v.pos.y},${v.pos.z}) ${v.materialId || 'concrete'} ${v.isSupport ? '[支撐]' : ''} ${v.externalLoad ? '[負載]' : ''}`);
+        }
+        if (selected.length > 10) lines.push(`  ... 還有 ${selected.length - 10} 個`);
+        return { success: true, message: lines.join('\n') };
+      },
+    });
+
+    // ═══════════════ VIEW COMMANDS ═══════════════
+    this.reg({
+      name: 'REGEN', aliases: ['RE'], syntax: 'REGEN',
+      description: '重新生成顯示',
+      category: 'view',
+      execute: () => {
+        eventBus.emit('viewport:regen', {});
+        return { success: true, message: '已重新生成顯示' };
+      },
+    });
+
+    this.reg({
+      name: 'ZOOM', aliases: ['Z'], syntax: 'ZOOM [ALL|EXTENTS|WINDOW]',
+      description: '縮放視圖',
+      category: 'view',
+      execute: (args) => {
+        const mode = (args[0] || 'all').toUpperCase();
+        eventBus.emit('viewport:zoom', { mode });
+        return { success: true, message: `ZOOM ${mode}` };
+      },
+    });
+
+    this.reg({
+      name: 'PAN', aliases: [], syntax: 'PAN',
+      description: '平移視圖',
+      category: 'view',
+      execute: () => {
+        return { success: true, message: '使用滑鼠中鍵拖拽平移視圖' };
+      },
+    });
+
     // Update VERSION command
     this.commands.delete('VERSION');
     this.commands.delete('VER');
@@ -856,7 +997,7 @@ class CommandEngine {
       description: '顯示版本資訊',
       category: 'system',
       execute: () => {
-        return { success: true, message: 'FastDesign v1.9 — 次世代 3D 敏捷設計系統\nElectron + React + Three.js + FEA Engine\n七大引擎 + 30+ 指令 + 完整 FEA 分析' };
+        return { success: true, message: 'FastDesign v2.1 — 次世代 3D 敏捷設計系統\nElectron + React + Three.js + FEA Engine\n六大引擎 + 40+ 指令 + Minecraft 風格操作 + AutoCAD 風格指令' };
       },
     });
   }

@@ -1,5 +1,5 @@
 import eventBus from './EventBus';
-import { Vec3, Voxel, SemanticTag, DEFAULT_MATERIALS, VoxelMaterial } from '../store/useStore';
+import { Vec3, Voxel, DEFAULT_MATERIALS, VoxelMaterial } from '../store/useStore';
 
 const CHUNK_SIZE = 16;
 function chunkKey(cx: number, cy: number, cz: number) { return `${cx},${cy},${cz}`; }
@@ -338,7 +338,7 @@ export class VoxelEngine {
   }
 
   // ─── Brush with strength gradient ───
-  brushPlace(center: Vec3, radius: number, shape: 'sphere' | 'cube' | 'cylinder', color: string, layerId: string, material?: VoxelMaterial, tag?: SemanticTag, strength: number = 1.0): Voxel[] {
+  brushPlace(center: Vec3, radius: number, shape: 'sphere' | 'cube' | 'cylinder', color: string, layerId: string, material?: VoxelMaterial, _tag?: string, strength: number = 1.0): Voxel[] {
     this.beginBatch();
     const placed: Voxel[] = [];
     const r = Math.ceil(radius);
@@ -371,7 +371,7 @@ export class VoxelEngine {
             pos,
             color,
             layerId,
-            semanticTag: tag,
+
             material: { ...mat },
             isSupport: false,
           };

@@ -40,11 +40,7 @@ const materialOptions = [
   { id: 'brick', label: '磚塊', color: '#8B3A3A' },
 ];
 
-const tags: {id:ToolType;label:string;color:string}[] = [
-  {id:'tag-sharp',label:'Sharp',color:'#ff4757'},
-  {id:'tag-smooth',label:'Smooth',color:'#3dd68c'},
-  {id:'tag-fillet',label:'Fillet',color:'#f5a623'},
-];
+
 
 export function Toolbar({ onShowPipeline, onShowLOD, onShowAbout, onShowShortcuts }: ToolbarProps) {
   const activeTool=useStore(s=>s.activeTool), setTool=useStore(s=>s.setTool);
@@ -127,18 +123,7 @@ export function Toolbar({ onShowPipeline, onShowLOD, onShowAbout, onShowShortcut
       </div>
       <div className="toolbar-divider"/>
 
-      {/* Semantic tags */}
-      <div className="toolbar-group">
-        <span className="toolbar-label">語意</span>
-        {tags.map(t=>(
-          <button key={t.id} className={`btn-sm ${activeTool===t.id?'active':''}`}
-            onClick={()=>setTool(t.id)}
-            style={{borderColor:activeTool===t.id?t.color:undefined,color:activeTool===t.id?t.color:undefined}}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div className="toolbar-divider"/>
+
 
       {/* Brush size */}
       <div className="toolbar-group">

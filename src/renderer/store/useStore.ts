@@ -9,8 +9,7 @@ export type ViewMode = 'wireframe'|'solid'|'rendered';
 export type ViewLayout = 'single'|'quad';
 export type CameraType = 'perspective'|'orthographic';
 export type SelectMode = 'object'|'vertex'|'edge'|'face';
-export type SemanticTag = 'sharp'|'smooth'|'fillet';
-export type SemanticCategory = 'structure'|'decoration'|'function';
+// SemanticTag and SemanticCategory removed in v2.1
 export type PipelineStatus = 'idle'|'running'|'done'|'error';
 export type LogLevel = 'info'|'success'|'warning'|'error';
 
@@ -31,8 +30,8 @@ export const DEFAULT_MATERIALS: Record<string, VoxelMaterial> = {
 };
 
 export interface Voxel {
-  id: string; pos: Vec3; color: string; semanticTag?: SemanticTag;
-  category?: SemanticCategory; layerId: string; materialId?: string;
+  id: string; pos: Vec3; color: string;
+  layerId: string; materialId?: string;
   material: VoxelMaterial;
   isSupport: boolean;       // 是否為固定支撐點
   externalLoad?: Vec3;      // 外部施加的力向量 (N)
@@ -138,8 +137,7 @@ export interface AppState {
   // Multiplayer
   collabUsers: CollabUser[]; isCollabActive: boolean;
 
-  // Semantic
-  semanticRules: { id: string; name: string; condition: string; action: string; enabled: boolean; }[];
+
 
   // Performance
   fps: number; memoryUsage: number; triangleCount: number; drawCalls: number;
@@ -242,7 +240,7 @@ const defaultLayers: Layer[] = [
 
 const defaultEngines: EngineStatus[] = [
   { name: '體素引擎', running: true },
-  { name: '語意引擎', running: true },
+
   { name: '負載引擎', running: true },
   { name: '圖層引擎', running: true },
   { name: '多人引擎', running: false },
@@ -295,10 +293,7 @@ export const useStore = create<AppState>()(
     materials: defaultMaterials, activeMaterialId: 'default',
     lodLevels: defaultLOD, currentLOD: 0,
     collabUsers: [], isCollabActive: false,
-    semanticRules: [
-      { id: 'r1', name: '結構完整性', condition: '應力 > 閾值', action: '標記弱點', enabled: true },
-      { id: 'r2', name: '裝飾一致性', condition: '相鄰語意不同', action: '建議統一', enabled: true },
-    ],
+
     fps: 60, memoryUsage: 0, triangleCount: 0, drawCalls: 0,
     activeVoxelMaterial: 'concrete',
     projectFilePath: null,

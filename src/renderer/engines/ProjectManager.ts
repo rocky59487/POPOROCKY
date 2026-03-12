@@ -40,8 +40,7 @@ class ProjectManager {
         id: v.id,
         pos: { ...v.pos },
         color: v.color,
-        semanticTag: v.semanticTag,
-        category: v.category,
+
         layerId: v.layerId,
         materialId: v.materialId,
         material: { ...v.material },

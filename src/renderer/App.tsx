@@ -132,12 +132,15 @@ export default function App() {
   }, [addGlueJoint, removeGlueJoint, clearGlueJoints]);
 
   // ─── Init + Demo voxels + Auto-save ───
+  const initRef = React.useRef(false);
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v2.0 完整版已啟動');
-    addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
-    addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
-    addLog('info', 'System', '30+ 指令可用：BOX/SPHERE/CYLINDER/COPY/MOVE/MIRROR/ROTATE/SELECT/MATERIAL/COLOR...');
-    addLog('info', 'System', 'FEA 負載引擎 + Glue 黏合系統 + OBJ 匯出引擎就緒');
+    if (initRef.current) return;
+    initRef.current = true;
+    addLog('info', 'System', 'FastDesign v2.1 已啟動');
+    addLog('info', 'System', '六大引擎已初始化（體素/負載/圖層/多人/貼圖/LOD）');
+    addLog('info', 'System', 'AutoCAD 風格指令列就緒 — 輸入 ` 或 : 聚焦');
+    addLog('info', 'System', '40+ 指令：BOX/LINE/RECT/CIRCLE/DIST/AREA/VOLUME/ANALYZE...');
+    addLog('info', 'System', 'Minecraft 風格操作：按 Tab 切換第一人稱模式');
 
     projectManager.startAutoSave();
 
@@ -379,12 +382,11 @@ export default function App() {
             s.setTool('fill');
           }
           break;
-        case '1': s.setTool('tag-sharp'); break;
-        case '2': s.setTool('tag-smooth'); break;
-        case '3': s.setTool('tag-fillet'); break;
-        case '5': s.setViewMode('wireframe'); break;
-        case '6': s.setViewMode('solid'); break;
-        case '7': s.setViewMode('rendered'); break;
+        // Numpad-style view switching
+        case '1': eventBus.emit('viewport:setView', { view: 'front' }); break;
+        case '3': eventBus.emit('viewport:setView', { view: 'right' }); break;
+        case '7': eventBus.emit('viewport:setView', { view: 'top' }); break;
+        case '5': eventBus.emit('viewport:setView', { view: 'iso' }); break;
       }
     };
     window.addEventListener('keydown', handler);

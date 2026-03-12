@@ -5,7 +5,7 @@ interface Props { open: boolean; onClose: () => void; }
 
 const engines = [
   { name: '體素引擎 (VoxelEngine)', color: '#3dd68c', desc: 'Chunk-based Octree, Undo/Redo, 三種刷形狀' },
-  { name: '語意引擎 (SemanticEngine)', color: '#638cff', desc: 'bitECS ECS 架構, json-rules-engine 規則引擎' },
+
   { name: '負載引擎 (LoadEngine)', color: '#ff4757', desc: '簡化桁架 FEA, CG 求解器, 應力熱圖' },
   { name: '圖層引擎 (LayerEngine)', color: '#f5a623', desc: 'Group 層級, 混合模式, 遮罩, 拖拽排序' },
   { name: '多人引擎 (MultiplayerEngine)', color: '#a78bfa', desc: 'Yjs CRDT, WebSocket, 游標追蹤' },
@@ -16,7 +16,7 @@ const engines = [
 const deps = [
   'Three.js', 'React Three Fiber', '@react-three/drei', 'Electron',
   'Zustand', 'Yjs', 'meshoptimizer', 'verb-nurbs-web', 'rhino3dm',
-  'cmdk', 'Fuse.js', 'bitECS', 'json-rules-engine', 'mathjs',
+  'cmdk', 'Fuse.js', 'mathjs',
   'three-mesh-bvh', 'Lucide React',
 ];
 
@@ -41,13 +41,13 @@ export function AboutDialog({ open, onClose }: Props) {
               次世代 3D 敏捷設計系統
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              版本 1.5.0 | Electron + React + Three.js
+              版本 2.1.0 | Electron + React + Three.js
             </div>
           </div>
 
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              七大引擎
+              六大引擎
             </div>
             {engines.map(e => (
               <div key={e.name} className="about-engine-item">

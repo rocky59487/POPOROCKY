@@ -3,8 +3,8 @@ import { useStore, Voxel, DEFAULT_MATERIALS } from '../store/useStore';
 import { loadEngine } from '../engines/LoadEngine';
 import eventBus from '../engines/EventBus';
 import {
-  Trash2, Copy, Anchor, ArrowDown, Paintbrush, Tag,
-  Link, Unlink, Eye, Layers, ChevronRight, Package
+  Trash2, Copy, Anchor, ArrowDown, Paintbrush,
+  Link, Eye, Layers, ChevronRight, Package
 } from 'lucide-react';
 
 interface ContextMenuState {
@@ -26,7 +26,7 @@ const MATERIAL_OPTIONS = [
 export function ContextMenu() {
   const [menu, setMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, voxel: null });
   const [showMaterialSub, setShowMaterialSub] = useState(false);
-  const [showSemanticSub, setShowSemanticSub] = useState(false);
+
   const menuRef = useRef<HTMLDivElement>(null);
 
   const removeVoxel = useStore(s => s.removeVoxel);
@@ -46,7 +46,7 @@ export function ContextMenu() {
       const y = Math.min(data.screenY, window.innerHeight - 400);
       setMenu({ visible: true, x, y, voxel: data.voxel });
       setShowMaterialSub(false);
-      setShowSemanticSub(false);
+
     };
     eventBus.on('context-menu:show', onShow);
     return () => { eventBus.off('context-menu:show', onShow); };
@@ -90,13 +90,9 @@ export function ContextMenu() {
     {
       icon: <Package size={13} />, label: `材質: ${currentMat.name}`,
       hasSubmenu: true,
-      action: () => { setShowMaterialSub(!showMaterialSub); setShowSemanticSub(false); },
+      action: () => { setShowMaterialSub(!showMaterialSub); },
     },
-    {
-      icon: <Tag size={13} />, label: `語意: ${v.semanticTag || '無'}`,
-      hasSubmenu: true,
-      action: () => { setShowSemanticSub(!showSemanticSub); setShowMaterialSub(false); },
-    },
+
     { type: 'separator' as const },
     {
       icon: <Anchor size={13} />, label: v.isSupport ? '取消固定支撐' : '設為固定支撐',
@@ -198,39 +194,7 @@ export function ContextMenu() {
         </div>
       )}
 
-      {/* Semantic tag submenu */}
-      {showSemanticSub && (
-        <div className="context-submenu" style={{ top: 94 }}>
-          {(['sharp', 'smooth', 'fillet'] as const).map(tag => (
-            <div
-              key={tag}
-              className={`context-menu-item ${tag === v.semanticTag ? 'highlight' : ''}`}
-              onClick={() => {
-                updateVoxel(v.id, { semanticTag: tag === v.semanticTag ? undefined : tag });
-                addLog('info', 'Semantic', `語意標記 → ${tag}`);
-                close();
-              }}
-            >
-              <span className="context-menu-label">
-                {tag === 'sharp' ? '銳邊 (Sharp)' : tag === 'smooth' ? '平滑 (Smooth)' : '圓角 (Fillet)'}
-              </span>
-              {tag === v.semanticTag && <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontSize: 11 }}>&#10003;</span>}
-            </div>
-          ))}
-          <div className="context-menu-separator" />
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              updateVoxel(v.id, { semanticTag: undefined });
-              addLog('info', 'Semantic', '清除語意標記');
-              close();
-            }}
-          >
-            <Unlink size={13} style={{ marginRight: 8 }} />
-            <span className="context-menu-label">清除標記</span>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }

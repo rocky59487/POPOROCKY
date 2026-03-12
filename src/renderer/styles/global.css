@@ -130,12 +130,12 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14p
 .app-main { display: flex; flex: 1; overflow: hidden; gap: 2px; padding: 2px; }
 .app-sidebar { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .app-sidebar.left { width: 260px; min-width: 200px; flex-shrink: 0; overflow-y: auto; max-height: 100%; }
-.app-sidebar.right { width: 280px; min-width: 220px; flex-shrink: 0; display: flex; flex-direction: row; }
-.sidebar-tabs { display: flex; flex-direction: column; gap: 2px; padding: 2px; background: var(--bg-surface); border-right: 1px solid var(--border); }
+.app-sidebar.right { width: 280px; min-width: 220px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; max-height: 100%; }
+.sidebar-tabs { display: flex; flex-direction: row; gap: 2px; padding: 2px; background: var(--bg-surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .sidebar-tab { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: var(--radius-sm); transition: all var(--transition-fast); }
 .sidebar-tab:hover { background: var(--bg-button-hover); color: var(--text-primary); }
 .sidebar-tab.active { background: var(--bg-button-active); color: var(--accent); }
-.sidebar-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; min-height: 0; }
 .app-center { flex: 1; display: flex; flex-direction: column; overflow: hidden; gap: 2px; }
 .app-viewport { flex: 1; display: flex; overflow: hidden; }
 
