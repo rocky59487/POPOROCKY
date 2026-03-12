@@ -28,6 +28,8 @@ import { AnalysisTimeline } from './components/panels/AnalysisTimeline';
 import { ContextMenu } from './components/ContextMenu';
 import { MaterialEditor } from './components/panels/MaterialEditor';
 import { IntegrityCheck } from './components/panels/IntegrityCheck';
+import { WelcomeScreen } from './components/WelcomeScreen';
+import { VoxelSearch } from './components/panels/VoxelSearch';
 
 type RightTab = 'layers' | 'texture' | 'load';
 
@@ -37,6 +39,9 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showPipeline, setShowPipeline] = useState(false);
   const [showLOD, setShowLOD] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(() => {
+    return localStorage.getItem('fd-hide-welcome') !== 'true';
+  });
   const pipeline = useStore(s => s.pipeline);
   const voxels = useStore(s => s.voxels);
   const addLog = useStore(s => s.addLog);
@@ -46,6 +51,7 @@ export default function App() {
   const addGlueJoint = useStore(s => s.addGlueJoint);
   const removeGlueJoint = useStore(s => s.removeGlueJoint);
   const clearGlueJoints = useStore(s => s.clearGlueJoints);
+  const markDirty = useStore(s => s.markDirty);
 
   // ─── IPC from Electron menu ───
   useEffect(() => {
@@ -71,32 +77,18 @@ export default function App() {
   useEffect(() => {
     const onExport = (data: { format: string; filename: string }) => {
       switch (data.format) {
-        case 'OBJ':
-          OBJExporter.downloadOBJ();
-          break;
-        case 'MTL':
-          OBJExporter.downloadMTL();
-          break;
-        case 'JSON':
-          projectManager.downloadProject();
-          break;
-        default:
-          addLog('warning', 'Export', `不支援的格式: ${data.format}`);
+        case 'OBJ': OBJExporter.downloadOBJ(); break;
+        case 'MTL': OBJExporter.downloadMTL(); break;
+        case 'JSON': projectManager.downloadProject(); break;
+        default: addLog('warning', 'Export', `不支援的格式: ${data.format}`);
       }
     };
-
-    const onSave = () => {
-      projectManager.downloadProject();
-    };
-
-    const onLoad = () => {
-      projectManager.openProject();
-    };
+    const onSave = () => { projectManager.downloadProject(); };
+    const onLoad = () => { projectManager.openProject(); };
 
     eventBus.on('export:request', onExport);
     eventBus.on('project:save', onSave);
     eventBus.on('project:load', onLoad);
-
     return () => {
       eventBus.off('export:request', onExport);
       eventBus.off('project:save', onSave);
@@ -109,14 +101,10 @@ export default function App() {
     const onGlueAdd = (data: { id: string; voxelA: Vec3; voxelB: Vec3; strength: number; type: string }) => {
       addGlueJoint({
         id: data.id || `gj_${Date.now()}`,
-        voxelA: data.voxelA,
-        voxelB: data.voxelB,
-        type: data.type || 'rigid',
-        strength: data.strength || 1.0,
+        voxelA: data.voxelA, voxelB: data.voxelB,
+        type: data.type || 'rigid', strength: data.strength || 1.0,
       });
-      addLog('success', 'Glue', `黏合 (${data.voxelA.x},${data.voxelA.y},${data.voxelA.z}) ↔ (${data.voxelB.x},${data.voxelB.y},${data.voxelB.z})`);
     };
-
     const onGlueRemove = (data: { voxelA: Vec3; voxelB: Vec3 }) => {
       const state = useStore.getState();
       const joint = state.glueJoints.find(j =>
@@ -126,41 +114,31 @@ export default function App() {
          j.voxelB.x === data.voxelA.x && j.voxelB.y === data.voxelA.y && j.voxelB.z === data.voxelA.z)
       );
       if (joint) removeGlueJoint(joint.id);
-      addLog('info', 'Glue', `解除黏合`);
     };
-
-    const onGlueClear = () => {
-      clearGlueJoints();
-      addLog('info', 'Glue', '已清除所有黏合');
-    };
+    const onGlueClear = () => { clearGlueJoints(); };
 
     eventBus.on('glue:add', onGlueAdd);
     eventBus.on('glue:remove', onGlueRemove);
     eventBus.on('glue:clear', onGlueClear);
-
     return () => {
       eventBus.off('glue:add', onGlueAdd);
       eventBus.off('glue:remove', onGlueRemove);
       eventBus.off('glue:clear', onGlueClear);
     };
-  }, [addGlueJoint, removeGlueJoint, clearGlueJoints, addLog]);
+  }, [addGlueJoint, removeGlueJoint, clearGlueJoints]);
 
   // ─── Init + Demo voxels + Auto-save ───
   useEffect(() => {
-    addLog('info', 'System', 'FastDesign v1.8 完整版已啟動');
+    addLog('info', 'System', 'FastDesign v1.9 完整版已啟動');
     addLog('info', 'System', '七大引擎已初始化（體素/語意/負載/圖層/多人/貼圖/LOD）');
     addLog('info', 'System', '指令列就緒 — 輸入 ` 或 : 聚焦，HELP 查看所有指令');
-    addLog('info', 'System', 'FEA 負載引擎 (桁架分析 + CG 求解器 + 材質預設庫) 就緒');
-    addLog('info', 'System', '體素引擎 (Octree + Undo/Redo + 三種刷形狀) 就緒');
-    addLog('info', 'System', 'Glue Joint 黏合系統就緒');
-    addLog('info', 'System', '專案管理器就緒（自動儲存每 5 分鐘）');
-    addLog('info', 'System', 'OBJ 匯出引擎就緒');
-    addLog('info', 'System', '模板庫就緒（8 個預設模板）');
+    addLog('info', 'System', '30+ 指令可用：BOX/SPHERE/CYLINDER/COPY/MOVE/MIRROR/ROTATE/SELECT/MATERIAL/COLOR...');
+    addLog('info', 'System', 'FEA 負載引擎 + Glue 黏合系統 + OBJ 匯出引擎就緒');
 
     projectManager.startAutoSave();
 
     if (projectManager.checkAutoSaveRecovery()) {
-      addLog('warning', 'AutoSave', '偵測到未儲存的自動備份，可透過指令列輸入 RECOVER 恢復');
+      addLog('warning', 'AutoSave', '偵測到未儲存的自動備份');
     }
 
     const concrete = MATERIAL_PRESETS.find(p => p.id === 'concrete')!.material;
@@ -177,8 +155,7 @@ export default function App() {
           id: `d_${c++}`, pos: { x, y: 0, z }, color: '#808080',
           layerId: 'structure', material: { ...concrete }, isSupport: true, materialId: 'concrete',
         };
-        addVoxel(v);
-        voxelEngine.addVoxel(v);
+        addVoxel(v); voxelEngine.addVoxel(v);
       }
     }
 
@@ -189,8 +166,7 @@ export default function App() {
           id: `d_${c++}`, pos: { x: px, y, z: pz }, color: '#C0C0C0',
           layerId: 'structure', material: { ...steel }, isSupport: false, materialId: 'steel',
         };
-        addVoxel(v);
-        voxelEngine.addVoxel(v);
+        addVoxel(v); voxelEngine.addVoxel(v);
       }
     }
 
@@ -201,8 +177,7 @@ export default function App() {
           id: `d_${c++}`, pos: { x, y: 6, z }, color: '#8B3A3A',
           layerId: 'decoration', material: { ...brick }, isSupport: false, materialId: 'brick',
         };
-        addVoxel(v);
-        voxelEngine.addVoxel(v);
+        addVoxel(v); voxelEngine.addVoxel(v);
       }
     }
 
@@ -212,8 +187,7 @@ export default function App() {
         id: `d_${c++}`, pos: { x: 0, y, z: 0 }, color: '#808080',
         layerId: 'default', material: { ...concrete }, isSupport: false, materialId: 'concrete',
       };
-      addVoxel(v);
-      voxelEngine.addVoxel(v);
+      addVoxel(v); voxelEngine.addVoxel(v);
     }
 
     // Wood beams
@@ -222,15 +196,12 @@ export default function App() {
         id: `d_${c++}`, pos: { x, y: 3, z: 0 }, color: '#8B4513',
         layerId: 'structure', material: { ...wood }, isSupport: false, materialId: 'wood',
       };
-      addVoxel(v);
-      voxelEngine.addVoxel(v);
+      addVoxel(v); voxelEngine.addVoxel(v);
     }
 
     addLog('success', 'Demo', `已載入示範結構: ${c} 個體素（混凝土=灰, 鋼=銀, 磚=紅棕, 木=棕）`);
 
-    return () => {
-      projectManager.stopAutoSave();
-    };
+    return () => { projectManager.stopAutoSave(); };
   }, []);
 
   // Pipeline execution
@@ -266,6 +237,8 @@ export default function App() {
               projectManager.takeScreenshot();
             } else {
               projectManager.downloadProject();
+              s.markSaved();
+              s.addLog('success', 'Save', '專案已儲存');
             }
             return;
           case 'o': e.preventDefault(); projectManager.openProject(); return;
@@ -275,7 +248,48 @@ export default function App() {
             s.selectVoxels(s.voxels.map(v => v.id));
             s.addLog('info', 'Edit', `已全選 ${s.voxels.length} 個體素`);
             return;
-          // Ctrl+E removed to avoid conflict with E=erase tool
+          case 'd':
+            e.preventDefault();
+            // Duplicate selected voxels
+            if (s.selectedVoxelIds.length > 0) {
+              const selected = s.voxels.filter(v => s.selectedVoxelIds.includes(v.id));
+              let count = 0;
+              const newIds: string[] = [];
+              for (const sv of selected) {
+                const np = { x: sv.pos.x + 1, y: sv.pos.y, z: sv.pos.z };
+                const exists = s.voxels.some(v => v.pos.x === np.x && v.pos.y === np.y && v.pos.z === np.z);
+                if (!exists) {
+                  const nid = `dup_${Date.now()}_${count}`;
+                  const nv: Voxel = {
+                    id: nid, pos: np, color: sv.color,
+                    layerId: sv.layerId, material: { ...sv.material }, isSupport: false, materialId: sv.materialId,
+                  };
+                  s.addVoxel(nv); voxelEngine.addVoxel(nv);
+                  newIds.push(nid); count++;
+                }
+              }
+              if (newIds.length > 0) s.selectVoxels(newIds);
+              s.addLog('info', 'Edit', `已複製 ${count} 個體素`);
+            }
+            return;
+          case 'g':
+            e.preventDefault();
+            // Group selected voxels into new layer
+            if (s.selectedVoxelIds.length > 0) {
+              const layerId = `layer_${Date.now()}`;
+              s.addLayer({
+                id: layerId, name: `群組_${s.layers.length}`,
+                color: '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0'),
+                visible: true, locked: false, opacity: 1, blendMode: 'normal',
+                order: s.layers.length, voxelCount: s.selectedVoxelIds.length,
+                physicsEnabled: false, maskEnabled: false,
+              });
+              for (const id of s.selectedVoxelIds) {
+                s.updateVoxel(id, { layerId });
+              }
+              s.addLog('info', 'Layer', `已將 ${s.selectedVoxelIds.length} 個體素移到新圖層`);
+            }
+            return;
         }
         return;
       }
@@ -298,16 +312,21 @@ export default function App() {
           if (selected.length > 0) {
             selected.forEach(id => {
               const v = s.voxels.find(v => v.id === id);
-              if (v) {
-                s.removeVoxel(id);
-                voxelEngine.removeVoxel(v.pos);
-              }
+              if (v) { s.removeVoxel(id); voxelEngine.removeVoxel(v.pos); }
             });
             s.clearSelection();
             s.addLog('info', 'Edit', `已刪除 ${selected.length} 個選取的體素`);
           }
           break;
         }
+        case '[':
+          s.setBrushSize(Math.max(1, s.brushSize - 1));
+          s.addLog('info', 'Brush', `刷子大小: ${Math.max(1, s.brushSize - 1)}`);
+          break;
+        case ']':
+          s.setBrushSize(Math.min(10, s.brushSize + 1));
+          s.addLog('info', 'Brush', `刷子大小: ${Math.min(10, s.brushSize + 1)}`);
+          break;
         default: break;
       }
 
@@ -322,7 +341,6 @@ export default function App() {
         case 'x': s.toggleAxes(); break;
         case 'f':
           if (!e.shiftKey) {
-            // Focus on selected voxels
             if (s.selectedVoxelIds.length > 0) {
               eventBus.emit('camera:focus', { ids: s.selectedVoxelIds });
               s.addLog('info', 'View', '聚焦到選取物件');
@@ -345,6 +363,16 @@ export default function App() {
 
   return (
     <div className="app-root">
+      {/* Welcome Screen */}
+      {showWelcome && (
+        <WelcomeScreen
+          onClose={() => setShowWelcome(false)}
+          onNewProject={() => projectManager.newProject()}
+          onOpenProject={() => projectManager.openProject()}
+          onShowTemplates={() => setRightTab('layers')}
+        />
+      )}
+
       <Toolbar
         onShowPipeline={() => setShowPipeline(true)}
         onShowLOD={() => setShowLOD(true)}
@@ -353,6 +381,7 @@ export default function App() {
       />
       <div className="app-main">
         <div className="app-sidebar left">
+          <VoxelSearch />
           <PropertiesPanel />
           <MaterialEditor />
           <BrushSettingsPanel />

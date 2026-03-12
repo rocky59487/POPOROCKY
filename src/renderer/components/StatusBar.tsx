@@ -74,7 +74,7 @@ export function StatusBar() {
         <span className="status-divider">|</span>
         <span className="status-item"><Cpu size={10} /> {mem} MB</span>
         <span className="status-divider">|</span>
-        <span className="status-item">FastDesign v1.8</span>
+        <span className="status-item">FastDesign v1.9</span>
       </div>
     </div>
   );

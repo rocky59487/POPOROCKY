@@ -4,6 +4,7 @@ import { ViewportScene } from './ViewportScene';
 import { MiniMap } from './MiniMap';
 import { FloatingToolbar } from './FloatingToolbar';
 import { PerfPanel } from './PerfPanel';
+import { ViewportOverlay } from './ViewportOverlay';
 import { Maximize2, Grid3X3 } from 'lucide-react';
 
 const quadViews = [
@@ -33,7 +34,7 @@ export function Viewport3D() {
       <div className="viewport-quad">
         {quadViews.map((v, i) => (
           <div key={i} className="viewport-container viewport-quad-cell">
-            <div className="viewport-overlay">
+            <div className="viewport-overlay-bar">
               <span className="viewport-badge">{v.label}</span>
               <button className="viewport-btn" onClick={() => setViewLayout('single')} title="最大化">
                 <Maximize2 size={12} />
@@ -48,7 +49,8 @@ export function Viewport3D() {
 
   return (
     <div className="viewport-container" style={{ position: 'relative' }}>
-      <div className="viewport-overlay">
+      {/* Top bar with badges */}
+      <div className="viewport-overlay-bar">
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span className="viewport-badge">{camLabel} | {modeLabel}</span>
           <span className="viewport-badge">體素: {voxelCount}</span>
@@ -71,6 +73,9 @@ export function Viewport3D() {
 
       {/* Performance Panel - top right */}
       <PerfPanel />
+
+      {/* Viewport Overlay - tool info, coords, project name */}
+      <ViewportOverlay />
 
       <ViewportScene />
       <MiniMap />
