@@ -26,7 +26,7 @@ import eventBus from '../engines/EventBus';
 import { Vec3, Voxel, NURBSSurface, PipelineState } from '../store/useStore';
 import { buildHermiteGrid, HermiteGrid } from '../engines/HermiteData';
 import { dualContouring, simplifyDCMesh, DCMeshData } from '../engines/DualContouring';
-import { fitNURBSFromDCMesh, NURBSFitResult } from '../engines/NURBSFitter';
+import { fitNURBSFromDCMesh, NURBSFitResult, FittingStats } from '../engines/NURBSFitter';
 
 /* ============================================================
    Types
@@ -45,6 +45,7 @@ export interface PipelineResult {
   verbSurfaces?: unknown[];
   hermiteGrid?: HermiteGrid;
   dcMesh?: DCMeshData;
+  fittingStats?: FittingStats;
 }
 
 type StageCallback = (stage: number, status: 'running'|'done'|'error', progress: number) => void;
@@ -368,22 +369,34 @@ export async function runVoxelToNURBS(
   const degV = Math.max(2, Math.min(5, params.nurbsDegree));
   const cpCount = Math.max(degU + 1, Math.min(32, params.controlPointCount));
 
+  const angleThreshold = params.angleThreshold > 0 ? params.angleThreshold : 30;
+
   const fitResult: NURBSFitResult = fitNURBSFromDCMesh(
-    simplified, degU, degV, cpCount, cpCount,
+    simplified, degU, degV, cpCount, cpCount, angleThreshold,
     p => onStage(2, 'running', p)
   );
   const t3End = performance.now();
 
   latestResult.surfaces = fitResult.surfaces;
   latestResult.verbSurfaces = fitResult.verbSurfaces;
+  latestResult.fittingStats = fitResult.fittingStats;
 
   onStage(2, 'done', 100);
+
+  const fs = fitResult.fittingStats;
   addLog('success', 'Stage3',
-    `完成: ${fitResult.stats.patchCount} patches, ` +
+    `完成: ${fs.totalPatches} patches ` +
+    `(${fs.exactPatches} exact, ${fs.approximatePatches} approx), ` +
     `${fitResult.stats.totalControlPoints} 控制點, ` +
-    `degree ${degU}, method=${fitResult.stats.method} ` +
+    `degree ${degU}, avgErr=${fs.avgMaxError.toFixed(4)}, ` +
+    `worstErr=${fs.worstPatchError.toFixed(4)} ` +
     `(${(t3End - t3).toFixed(0)}ms)`
   );
+
+  if (fs.approximatePatches > 0) {
+    addLog('warning', 'Stage3',
+      `${fs.approximatePatches}/${fs.totalPatches} patches 使用近似模式`);
+  }
 
   // ──────────────────────────────────────────────────────────
   //  Summary

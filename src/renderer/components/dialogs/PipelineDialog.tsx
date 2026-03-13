@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Play, SkipForward, RotateCcw, Download, CheckCircle, Clock, AlertCircle, Loader, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Play, SkipForward, RotateCcw, Download, CheckCircle, Clock, AlertCircle, Loader, ChevronDown, ChevronRight, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 
 interface Props { open: boolean; onClose: () => void; }
@@ -18,6 +18,7 @@ export function PipelineDialog({ open, onClose }: Props) {
   const setPipelineParams = useStore(s => s.setPipelineParams);
   const startPipeline = useStore(s => s.startPipeline);
   const resetPipeline = useStore(s => s.resetPipeline);
+  const toggleApproximateOverlay = useStore(s => s.toggleApproximateOverlay);
   const addLog = useStore(s => s.addLog);
   const [mode, setMode] = useState<'all' | 'step'>('all');
   const [expandedStage, setExpandedStage] = useState<number>(0);
@@ -28,7 +29,6 @@ export function PipelineDialog({ open, onClose }: Props) {
   const handleRun = () => {
     startPipeline();
     addLog('info', 'Pipeline', `管線開始執行 (${mode === 'all' ? '全部' : '逐步'} 模式)`);
-    // Simulate pipeline execution
     let progress = 0;
     const interval = setInterval(() => {
       progress += 5;
@@ -43,27 +43,39 @@ export function PipelineDialog({ open, onClose }: Props) {
     setExpandedStage(expandedStage === idx ? -1 : idx);
   };
 
+  const fittingStats = pipeline.fittingStats;
+  const approxRatio = fittingStats && fittingStats.totalPatches > 0
+    ? fittingStats.approximatePatches / fittingStats.totalPatches
+    : 0;
+
   const stageConfigs = [
     {
-      name: '等值面提取 (Marching Cubes)',
-      desc: '將體素密度場轉換為三角網格',
+      name: 'Dual Contouring 等值面提取',
+      desc: '使用 True Dual Contouring 演算法將體素轉換為三角網格',
       params: (
         <>
           <div className="param-row">
-            <label>等值面閾值 (isoLevel)</label>
-            <input type="range" min="0.1" max="0.9" step="0.05"
+            <label>QEF 閾值</label>
+            <input type="range" min="0.001" max="0.1" step="0.001"
               value={pipeline.params.qefThreshold}
               onChange={e => setPipelineParams({ qefThreshold: +e.target.value })} />
-            <span className="param-value">{pipeline.params.qefThreshold.toFixed(2)}</span>
+            <span className="param-value">{pipeline.params.qefThreshold.toFixed(3)}</span>
           </div>
         </>
       ),
     },
     {
-      name: 'QEM 網格簡化',
-      desc: '使用 Quadric Error Metrics 簡化網格並辨識特徵線',
+      name: 'Region Growing 分群 + PCA 參數化',
+      desc: '使用法向角度增長分群，PCA 主軸投影 UV 參數化',
       params: (
         <>
+          <div className="param-row">
+            <label>分群角度閾值 (°)</label>
+            <input type="range" min="10" max="60" step="5"
+              value={pipeline.params.angleThreshold}
+              onChange={e => setPipelineParams({ angleThreshold: +e.target.value })} />
+            <span className="param-value">{pipeline.params.angleThreshold}°</span>
+          </div>
           <div className="param-row">
             <label>簡化比例 (%)</label>
             <input type="range" min="10" max="100" step="5"
@@ -71,25 +83,18 @@ export function PipelineDialog({ open, onClose }: Props) {
               onChange={e => setPipelineParams({ pcaTolerance: +e.target.value / 500 })} />
             <span className="param-value">{Math.round(pipeline.params.pcaTolerance * 500)}%</span>
           </div>
-          <div className="param-row">
-            <label>特徵角度閾值 (°)</label>
-            <input type="range" min="5" max="90" step="5"
-              value={45}
-              onChange={() => {}} />
-            <span className="param-value">45°</span>
-          </div>
         </>
       ),
     },
     {
-      name: 'NURBS 曲面擬合',
-      desc: '使用 verb-nurbs 將簡化網格擬合為 B-Spline 曲面',
+      name: 'NURBS 曲面擬合（Least Squares）',
+      desc: '使用 Householder QR 求解器進行 B-Spline 曲面擬合（近似方法，非 TRF）',
       params: (
         <>
           <div className="param-row">
             <label>NURBS 階數</label>
             <div className="param-select">
-              {[3, 4, 5].map(d => (
+              {[1, 2, 3, 4, 5].map(d => (
                 <button key={d}
                   className={`param-option ${pipeline.params.nurbsDegree === d ? 'active' : ''}`}
                   onClick={() => setPipelineParams({ nurbsDegree: d })}>
@@ -205,6 +210,99 @@ export function PipelineDialog({ open, onClose }: Props) {
               </div>
             );
           })}
+
+          {/* Fitting Stats (shown after pipeline completes) */}
+          {fittingStats && pipeline.status === 'done' && (
+            <div style={{
+              marginTop: 12, padding: 12,
+              border: `1px solid ${approxRatio > 0.3 ? '#f0932b' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-md)',
+              background: approxRatio > 0.3 ? 'rgba(240, 147, 43, 0.08)' : 'rgba(255,255,255,0.02)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                {approxRatio > 0.3
+                  ? <AlertTriangle size={14} style={{ color: '#f0932b' }} />
+                  : <CheckCircle size={14} style={{ color: '#3dd68c' }} />
+                }
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  擬合統計
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 11 }}>
+                <div style={{ color: 'var(--text-secondary)' }}>精確 patch</div>
+                <div style={{ color: '#3dd68c', fontFamily: 'var(--font-mono)' }}>
+                  {fittingStats.exactPatches} / {fittingStats.totalPatches}
+                </div>
+
+                <div style={{ color: 'var(--text-secondary)' }}>近似 patch</div>
+                <div style={{
+                  color: fittingStats.approximatePatches > 0 ? '#f0932b' : 'var(--text-muted)',
+                  fontFamily: 'var(--font-mono)',
+                }}>
+                  {fittingStats.approximatePatches}
+                </div>
+
+                <div style={{ color: 'var(--text-secondary)' }}>平均最大誤差</div>
+                <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+                  {fittingStats.avgMaxError.toFixed(4)}
+                </div>
+
+                <div style={{ color: 'var(--text-secondary)' }}>最差 patch 誤差</div>
+                <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+                  {fittingStats.worstPatchError.toFixed(4)}
+                </div>
+              </div>
+
+              {/* Fallback reasons */}
+              {fittingStats.fallbackReasons.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>Fallback 原因：</div>
+                  {fittingStats.fallbackReasons.map((reason, idx) => (
+                    <div key={idx} style={{
+                      fontSize: 10, color: '#f0932b', padding: '2px 0',
+                      fontFamily: 'var(--font-mono)',
+                    }}>
+                      {idx + 1}. {reason}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Warning for high approximate ratio */}
+              {approxRatio > 0.3 && (
+                <div style={{
+                  marginTop: 8, padding: '6px 8px',
+                  background: 'rgba(240, 147, 43, 0.15)',
+                  borderRadius: 4, fontSize: 10, color: '#f0932b',
+                  lineHeight: 1.5,
+                }}>
+                  超過 30% 的 patch 使用近似模式（{(approxRatio * 100).toFixed(0)}%），
+                  建議增加模型支撐點或降低解析度以改善擬合品質。
+                </div>
+              )}
+
+              {/* Toggle approximate overlay button */}
+              {fittingStats.approximatePatches > 0 && (
+                <button
+                  className="btn btn-sm"
+                  onClick={toggleApproximateOverlay}
+                  style={{
+                    marginTop: 8, width: '100%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    background: pipeline.showApproximateOverlay ? 'rgba(240, 147, 43, 0.2)' : undefined,
+                    borderColor: pipeline.showApproximateOverlay ? '#f0932b' : undefined,
+                    color: pipeline.showApproximateOverlay ? '#f0932b' : undefined,
+                  }}
+                >
+                  {pipeline.showApproximateOverlay
+                    ? <><EyeOff size={12} /> 隱藏 fallback patch</>
+                    : <><Eye size={12} /> 顯示 fallback patch</>
+                  }
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Controls */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>

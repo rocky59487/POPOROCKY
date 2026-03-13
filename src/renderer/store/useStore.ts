@@ -55,11 +55,22 @@ export interface NURBSSurface {
   knotsU: number[]; knotsV: number[]; weights: number[][];
 }
 
+export interface PipelineFittingStats {
+  totalPatches: number;
+  exactPatches: number;
+  approximatePatches: number;
+  fallbackReasons: string[];
+  avgMaxError: number;
+  worstPatchError: number;
+}
+
 export interface PipelineState {
   status: PipelineStatus; currentStage: number; totalStages: number;
   progress: number; stages: { name: string; status: PipelineStatus; progress: number; }[];
-  params: { qefThreshold: number; pcaTolerance: number; nurbsDegree: number; controlPointCount: number; };
+  params: { qefThreshold: number; pcaTolerance: number; nurbsDegree: number; controlPointCount: number; angleThreshold: number; };
   result?: NURBSSurface[];
+  fittingStats?: PipelineFittingStats;
+  showApproximateOverlay: boolean;
 }
 
 // FEA 結果
@@ -206,6 +217,8 @@ export interface AppState {
   completePipeline: (surfaces: NURBSSurface[]) => void;
   setPipelineParams: (p: Partial<PipelineState['params']>) => void;
   resetPipeline: () => void;
+  setFittingStats: (stats: PipelineFittingStats) => void;
+  toggleApproximateOverlay: () => void;
 
   // FEA
   setFEAResult: (r: FEAResult | null) => void;
@@ -308,7 +321,8 @@ export const useStore = create<AppState>()(
         { name: 'PCA 簡化', status: 'idle', progress: 0 },
         { name: 'NURBS 擬合', status: 'idle', progress: 0 },
       ],
-      params: { qefThreshold: 0.01, pcaTolerance: 0.05, nurbsDegree: 3, controlPointCount: 16 },
+      params: { qefThreshold: 0.01, pcaTolerance: 0.05, nurbsDegree: 3, controlPointCount: 16, angleThreshold: 30 },
+      showApproximateOverlay: false,
     },
     loadAnalysis: {
       gravity: { x: 0, y: -1, z: 0 },
@@ -438,8 +452,12 @@ export const useStore = create<AppState>()(
       s.pipeline.currentStage = 0;
       s.pipeline.progress = 0;
       s.pipeline.result = undefined;
+      s.pipeline.fittingStats = undefined;
+      s.pipeline.showApproximateOverlay = false;
       s.pipeline.stages.forEach(st => { st.status = 'idle'; st.progress = 0; });
     }),
+    setFittingStats: (stats) => set((s) => { s.pipeline.fittingStats = stats; }),
+    toggleApproximateOverlay: () => set((s) => { s.pipeline.showApproximateOverlay = !s.pipeline.showApproximateOverlay; }),
 
     // FEA
     setFEAResult: (r) => set((s) => { s.loadAnalysis.result = r as any; }),
