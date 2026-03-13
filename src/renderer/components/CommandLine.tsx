@@ -258,7 +258,7 @@ export function CommandLine() {
         }
       }
 
-      const results = fuse.search(cmdPart).slice(0, 8).map((r: Fuse.FuseResult<CommandDef>) => r.item);
+      const results = fuse.search(cmdPart).slice(0, 8).map((r) => r.item);
       if (showSuggestions) {
         setSuggestions(results);
         setSelectedSuggestion(results.length > 0 ? 0 : -1);
