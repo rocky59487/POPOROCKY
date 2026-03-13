@@ -2,7 +2,17 @@ import React, { useState } from 'react';
 import { useStore, Voxel, DEFAULT_MATERIALS } from '../../store/useStore';
 import { voxelEngine } from '../../engines/VoxelEngine';
 import { MATERIAL_PRESETS } from '../../engines/LoadEngine';
+import { semanticEngine, VoxelCategory } from '../../engines/SemanticEngine';
 import { BookOpen, ChevronDown, ChevronRight, Building2, Columns3, Fence, Box, Triangle, Hexagon } from 'lucide-react';
+
+interface TemplateVoxelData {
+  pos: { x: number; y: number; z: number };
+  materialId: string;
+  /** 語意分類（可選，預設由 SemanticEngine 自動推斷） */
+  semanticCategory?: VoxelCategory;
+  /** 語意標籤（可選） */
+  semanticTags?: string[];
+}
 
 interface TemplateItem {
   id: string;
@@ -10,7 +20,7 @@ interface TemplateItem {
   icon: React.ReactNode;
   description: string;
   category: string;
-  generate: (ox: number, oy: number, oz: number) => { pos: { x: number; y: number; z: number }; materialId: string }[];
+  generate: (ox: number, oy: number, oz: number) => TemplateVoxelData[];
 }
 
 const getMat = (id: string) => {
@@ -27,9 +37,10 @@ const templates: TemplateItem[] = [
     id: 'wall_3x5', name: '牆壁 3×5', icon: <Fence size={14} />,
     description: '3格寬 5格高的磚牆', category: '基礎',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       for (let x = 0; x < 3; x++) for (let y = 0; y < 5; y++)
-        result.push({ pos: { x: ox + x, y: oy + y, z: oz }, materialId: 'brick' });
+        result.push({ pos: { x: ox + x, y: oy + y, z: oz }, materialId: 'brick',
+          semanticCategory: 'structure', semanticTags: ['wall'] });
       return result;
     },
   },
@@ -37,9 +48,10 @@ const templates: TemplateItem[] = [
     id: 'pillar_1x8', name: '柱子 1×8', icon: <Columns3 size={14} />,
     description: '1格寬 8格高的鋼柱', category: '基礎',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       for (let y = 0; y < 8; y++)
-        result.push({ pos: { x: ox, y: oy + y, z: oz }, materialId: 'steel' });
+        result.push({ pos: { x: ox, y: oy + y, z: oz }, materialId: 'steel',
+          semanticCategory: 'structure', semanticTags: ['column'] });
       return result;
     },
   },
@@ -47,9 +59,10 @@ const templates: TemplateItem[] = [
     id: 'floor_5x5', name: '樓板 5×5', icon: <Box size={14} />,
     description: '5×5 混凝土樓板', category: '基礎',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       for (let x = 0; x < 5; x++) for (let z = 0; z < 5; z++)
-        result.push({ pos: { x: ox + x, y: oy, z: oz + z }, materialId: 'concrete' });
+        result.push({ pos: { x: ox + x, y: oy, z: oz + z }, materialId: 'concrete',
+          semanticCategory: 'structure', semanticTags: ['slab'] });
       return result;
     },
   },
@@ -57,9 +70,10 @@ const templates: TemplateItem[] = [
     id: 'beam_7', name: '橫樑 7格', icon: <Box size={14} />,
     description: '7格長的木橫樑', category: '基礎',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       for (let x = 0; x < 7; x++)
-        result.push({ pos: { x: ox + x, y: oy, z: oz }, materialId: 'wood' });
+        result.push({ pos: { x: ox + x, y: oy, z: oz }, materialId: 'wood',
+          semanticCategory: 'structure', semanticTags: ['beam'] });
       return result;
     },
   },
@@ -67,16 +81,21 @@ const templates: TemplateItem[] = [
     id: 'arch_5', name: '拱門 5格', icon: <Triangle size={14} />,
     description: '5格寬的拱門結構', category: '結構',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       // Pillars
       for (let y = 0; y < 4; y++) {
-        result.push({ pos: { x: ox, y: oy + y, z: oz }, materialId: 'brick' });
-        result.push({ pos: { x: ox + 4, y: oy + y, z: oz }, materialId: 'brick' });
+        result.push({ pos: { x: ox, y: oy + y, z: oz }, materialId: 'brick',
+          semanticCategory: 'structure', semanticTags: ['arch', 'column'] });
+        result.push({ pos: { x: ox + 4, y: oy + y, z: oz }, materialId: 'brick',
+          semanticCategory: 'structure', semanticTags: ['arch', 'column'] });
       }
       // Arch top
-      result.push({ pos: { x: ox + 1, y: oy + 4, z: oz }, materialId: 'brick' });
-      result.push({ pos: { x: ox + 2, y: oy + 5, z: oz }, materialId: 'brick' });
-      result.push({ pos: { x: ox + 3, y: oy + 4, z: oz }, materialId: 'brick' });
+      result.push({ pos: { x: ox + 1, y: oy + 4, z: oz }, materialId: 'brick',
+        semanticCategory: 'structure', semanticTags: ['arch'] });
+      result.push({ pos: { x: ox + 2, y: oy + 5, z: oz }, materialId: 'brick',
+        semanticCategory: 'structure', semanticTags: ['arch'] });
+      result.push({ pos: { x: ox + 3, y: oy + 4, z: oz }, materialId: 'brick',
+        semanticCategory: 'structure', semanticTags: ['arch'] });
       return result;
     },
   },
@@ -84,20 +103,25 @@ const templates: TemplateItem[] = [
     id: 'frame_4x4x4', name: '框架 4×4×4', icon: <Building2 size={14} />,
     description: '4×4×4 鋼框架結構', category: '結構',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       // 4 pillars
       for (const [px, pz] of [[0, 0], [3, 0], [0, 3], [3, 3]]) {
         for (let y = 0; y < 4; y++)
-          result.push({ pos: { x: ox + px, y: oy + y, z: oz + pz }, materialId: 'steel' });
+          result.push({ pos: { x: ox + px, y: oy + y, z: oz + pz }, materialId: 'steel',
+            semanticCategory: 'structure', semanticTags: ['column'] });
       }
       // Top beams
       for (let x = 0; x <= 3; x++) {
-        result.push({ pos: { x: ox + x, y: oy + 3, z: oz }, materialId: 'steel' });
-        result.push({ pos: { x: ox + x, y: oy + 3, z: oz + 3 }, materialId: 'steel' });
+        result.push({ pos: { x: ox + x, y: oy + 3, z: oz }, materialId: 'steel',
+          semanticCategory: 'structure', semanticTags: ['beam'] });
+        result.push({ pos: { x: ox + x, y: oy + 3, z: oz + 3 }, materialId: 'steel',
+          semanticCategory: 'structure', semanticTags: ['beam'] });
       }
       for (let z = 1; z < 3; z++) {
-        result.push({ pos: { x: ox, y: oy + 3, z: oz + z }, materialId: 'steel' });
-        result.push({ pos: { x: ox + 3, y: oy + 3, z: oz + z }, materialId: 'steel' });
+        result.push({ pos: { x: ox, y: oy + 3, z: oz + z }, materialId: 'steel',
+          semanticCategory: 'structure', semanticTags: ['beam'] });
+        result.push({ pos: { x: ox + 3, y: oy + 3, z: oz + z }, materialId: 'steel',
+          semanticCategory: 'structure', semanticTags: ['beam'] });
       }
       return result;
     },
@@ -106,11 +130,13 @@ const templates: TemplateItem[] = [
     id: 'stairs_5', name: '階梯 5級', icon: <Triangle size={14} />,
     description: '5級混凝土階梯', category: '結構',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       for (let step = 0; step < 5; step++) {
         for (let fill = 0; fill <= step; fill++) {
-          result.push({ pos: { x: ox + step, y: oy + fill, z: oz }, materialId: 'concrete' });
-          result.push({ pos: { x: ox + step, y: oy + fill, z: oz + 1 }, materialId: 'concrete' });
+          result.push({ pos: { x: ox + step, y: oy + fill, z: oz }, materialId: 'concrete',
+            semanticCategory: 'structure', semanticTags: ['stair'] });
+          result.push({ pos: { x: ox + step, y: oy + fill, z: oz + 1 }, materialId: 'concrete',
+            semanticCategory: 'structure', semanticTags: ['stair'] });
         }
       }
       return result;
@@ -120,13 +146,14 @@ const templates: TemplateItem[] = [
     id: 'pyramid_5', name: '金字塔 5層', icon: <Hexagon size={14} />,
     description: '5層金字塔結構', category: '造型',
     generate: (ox, oy, oz) => {
-      const result: { pos: { x: number; y: number; z: number }; materialId: string }[] = [];
+      const result: TemplateVoxelData[] = [];
       for (let layer = 0; layer < 5; layer++) {
         const size = 5 - layer;
         const off = layer;
         for (let x = 0; x < size; x++) {
           for (let z = 0; z < size; z++) {
-            result.push({ pos: { x: ox + off + x, y: oy + layer, z: oz + off + z }, materialId: 'brick' });
+            result.push({ pos: { x: ox + off + x, y: oy + layer, z: oz + off + z }, materialId: 'brick',
+              semanticCategory: 'decoration', semanticTags: ['pyramid'] });
           }
         }
       }
@@ -150,8 +177,9 @@ export function TemplateLibrary() {
     for (const d of voxelData) {
       const mat = getMat(d.materialId);
       const color = MATERIAL_COLORS[d.materialId] || '#808080';
+      const vId = `tpl_${Date.now()}_${count}`;
       const v: Voxel = {
-        id: `tpl_${Date.now()}_${count}`,
+        id: vId,
         pos: d.pos,
         color,
         layerId: activeLayerId,
@@ -161,9 +189,23 @@ export function TemplateLibrary() {
       };
       addVoxel(v);
       voxelEngine.addVoxel(v);
+
+      // 設定語意標籤（如果模板有提供）
+      if (d.semanticCategory || d.semanticTags) {
+        if (d.semanticCategory) {
+          semanticEngine.setCategory(vId, d.semanticCategory);
+        }
+        if (d.semanticTags) {
+          for (const tag of d.semanticTags) {
+            semanticEngine.addTag(vId, tag);
+          }
+        }
+      }
       count++;
     }
     addLog('success', 'Template', `已放置模板「${template.name}」(${count} 個體素)`);
+    // 刷新語意統計
+    useStore.getState().refreshSemanticStats();
   };
 
   return (

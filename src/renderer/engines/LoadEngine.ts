@@ -154,7 +154,15 @@ export class LoadEngine {
       crossSectionArea: CROSS_SECTION,
       gravityAcceleration: this.gravityMagnitude,
       gravityDirection: this.gravity,
+      autoSupports: true,
     });
+
+    // 檢查求解是否成功
+    if (!solverResult.success) {
+      console.warn(`[LoadEngine] FEA failed: ${solverResult.error}`);
+      eventBus.emit('load:error', { error: solverResult.error });
+      return { edges: [], displacements: new Map(), dangerCount: 0, maxStressRatio: 0, totalEdges: 0 };
+    }
 
     this.lastSolverResult = solverResult;
 

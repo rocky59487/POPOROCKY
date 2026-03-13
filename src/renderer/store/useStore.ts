@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { voxelBuffer, VoxelBuffer } from '../engines/VoxelBuffer';
 import { spatialIndex } from '../engines/SpatialIndex';
+import { semanticEngine, SemanticStats, RuleCheckResult, VoxelCategory } from '../engines/SemanticEngine';
+import { getDefaultDesignRules } from '../engines/designRules';
+import { loadEngine } from '../engines/LoadEngine';
 
 /* ============================================================
    Types
@@ -11,7 +14,8 @@ export type ViewMode = 'wireframe'|'solid'|'rendered';
 export type ViewLayout = 'single'|'quad';
 export type CameraType = 'perspective'|'orthographic';
 export type SelectMode = 'object'|'vertex'|'edge'|'face';
-// SemanticTag and SemanticCategory removed in v2.1
+// Semantic types (v2.5)
+export type { VoxelCategory, SemanticStats, RuleCheckResult } from '../engines/SemanticEngine';
 export type PipelineStatus = 'idle'|'running'|'done'|'error';
 export type LogLevel = 'info'|'success'|'warning'|'error';
 
@@ -161,6 +165,11 @@ export interface AppState {
   // Glue joints
   glueJoints: { id: string; voxelA: Vec3; voxelB: Vec3; type: string; strength: number }[];
 
+  // Semantic Engine (v2.5)
+  semanticStats: SemanticStats;
+  ruleCheckResults: RuleCheckResult[];
+  semanticFilter: { category: VoxelCategory | null; tag: string | null };
+
   // Actions
   setTool: (tool: ToolType) => void;
   setViewLayout: (l: ViewLayout) => void;
@@ -243,7 +252,12 @@ export interface AppState {
   removeVoxelFromBuffer: (x: number, y: number, z: number) => boolean;
   clearBuffer: () => void;
 
-  // Async FEA
+  // Semantic Engine (v2.5)
+  refreshSemanticStats: () => void;
+  runRuleCheck: () => void;
+  setSemanticFilter: (filter: { category: VoxelCategory | null; tag: string | null }) => void;
+
+  // Async FEA (uses FEASolver)
   runFEAAsync: () => Promise<void>;
 }
 
@@ -317,6 +331,9 @@ export const useStore = create<AppState>()(
     lastSaveTime: Date.now(),
     isDirty: false,
     glueJoints: [],
+    semanticStats: { structure: 0, decoration: 0, functional: 0, tagCounts: {} },
+    ruleCheckResults: [],
+    semanticFilter: { category: null, tag: null },
     voxelBufferRef: voxelBuffer,
     bufferVersion: 0,
 
@@ -339,6 +356,10 @@ export const useStore = create<AppState>()(
       s.voxels.push(v);
       const layer = s.layers.find(l => l.id === v.layerId);
       if (layer) layer.voxelCount++;
+      // Register with SemanticEngine
+      semanticEngine.registerVoxel({
+        id: v.id, pos: v.pos, materialId: v.materialId, layerId: v.layerId, isSupport: v.isSupport,
+      });
     }),
     removeVoxel: (id) => set((s) => {
       const idx = s.voxels.findIndex(v => v.id === id);
@@ -349,6 +370,8 @@ export const useStore = create<AppState>()(
         s.voxels.splice(idx, 1);
       }
       s.selectedVoxelIds = s.selectedVoxelIds.filter(sid => sid !== id);
+      // Remove from SemanticEngine
+      semanticEngine.removeVoxel(id);
     }),
     selectVoxels: (ids) => set((s) => { s.selectedVoxelIds = ids; }),
     clearSelection: () => set((s) => { s.selectedVoxelIds = []; }),
@@ -502,85 +525,61 @@ export const useStore = create<AppState>()(
     clearBuffer: () => {
       voxelBuffer.clear();
       spatialIndex.clear();
+      semanticEngine.clearEntities();
       set((s) => { s.voxels = []; s.bufferVersion = voxelBuffer.version; });
     },
 
-    // Async FEA using Web Worker
+    // Semantic Engine actions (v2.5)
+    refreshSemanticStats: () => set((s) => {
+      s.semanticStats = semanticEngine.getStats() as any;
+    }),
+    runRuleCheck: () => set((s) => {
+      const context = {
+        allEntities: (semanticEngine as any).entities as Map<string, any>,
+        feaResults: semanticEngine.getLastFEAResults(),
+      };
+      s.ruleCheckResults = semanticEngine.evaluateAllRules(context) as any;
+      s.semanticStats = semanticEngine.getStats() as any;
+    }),
+    setSemanticFilter: (filter) => set((s) => {
+      s.semanticFilter = filter as any;
+    }),
+
+    // Async FEA using FEASolver + SemanticEngine integration
     runFEAAsync: async () => {
       const state = useStore.getState();
       state.setFEAComputing(true);
       try {
-        // Use inline worker-like computation for now (Comlink integration)
-        const snapshot = voxelBuffer.getTransferableSnapshot();
+        // 使用 LoadEngine（內部呼叫 FEASolver）
         const glueJoints = state.glueJoints.map((gj: { voxelA: Vec3; voxelB: Vec3; strength: number }) => ({
           voxelA: gj.voxelA, voxelB: gj.voxelB, strength: gj.strength,
         }));
 
-        // Simple FEA computation (same as worker but inline for compatibility)
-        const { positions, materials, properties, flags, loads, count } = snapshot;
-        const posMap = new Map<string, number>();
-        for (let i = 0; i < count; i++) {
-          const i3 = i * 3;
-          posMap.set(`${Math.round(positions[i3])},${Math.round(positions[i3+1])},${Math.round(positions[i3+2])}`, i);
+        const result = loadEngine.computeFEA(state.voxels, glueJoints);
+
+        state.setFEAResult(result);
+
+        // 將 FEA 結果套用到 SemanticEngine
+        const nodeStressRatios = new Map<string, number>();
+        for (const edge of result.edges) {
+          const keyA = `${edge.nodeA.x},${edge.nodeA.y},${edge.nodeA.z}`;
+          const keyB = `${edge.nodeB.x},${edge.nodeB.y},${edge.nodeB.z}`;
+          const existA = nodeStressRatios.get(keyA) || 0;
+          const existB = nodeStressRatios.get(keyB) || 0;
+          if (edge.stressRatio > existA) nodeStressRatios.set(keyA, edge.stressRatio);
+          if (edge.stressRatio > existB) nodeStressRatios.set(keyB, edge.stressRatio);
         }
-
-        const edgeSet = new Set<string>();
-        const rawEdges: Array<{a: number; b: number; strength: number}> = [];
-        const offsets: [number,number,number][] = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-
-        for (let i = 0; i < count; i++) {
-          const i3 = i * 3;
-          const x = Math.round(positions[i3]), y = Math.round(positions[i3+1]), z = Math.round(positions[i3+2]);
-          for (const [dx,dy,dz] of offsets) {
-            const nIdx = posMap.get(`${x+dx},${y+dy},${z+dz}`);
-            if (nIdx !== undefined) {
-              const ek = i < nIdx ? `${i}-${nIdx}` : `${nIdx}-${i}`;
-              if (!edgeSet.has(ek)) { edgeSet.add(ek); rawEdges.push({a:i, b:nIdx, strength:1}); }
-            }
-          }
-        }
-
-        for (const gj of glueJoints) {
-          const aKey = `${Math.round(gj.voxelA.x)},${Math.round(gj.voxelA.y)},${Math.round(gj.voxelA.z)}`;
-          const bKey = `${Math.round(gj.voxelB.x)},${Math.round(gj.voxelB.y)},${Math.round(gj.voxelB.z)}`;
-          const aIdx = posMap.get(aKey), bIdx = posMap.get(bKey);
-          if (aIdx !== undefined && bIdx !== undefined) {
-            const ek = aIdx < bIdx ? `${aIdx}-${bIdx}` : `${bIdx}-${aIdx}`;
-            if (!edgeSet.has(ek)) { edgeSet.add(ek); rawEdges.push({a:aIdx, b:bIdx, strength:gj.strength}); }
-          }
-        }
-
-        const feaEdges: FEAEdge[] = [];
-        let maxSR = 0, danger = 0, overload = 0;
-        const gMag = state.loadAnalysis.gravityMagnitude;
-
-        for (const edge of rawEdges) {
-          const a3 = edge.a*3, b3 = edge.b*3, a4 = edge.a*4, b4 = edge.b*4;
-          const density = properties[a4+2] || 2400;
-          let force = density * gMag / 6 * edge.strength;
-          if (flags[edge.a] & 2) force += Math.sqrt(loads[a3]**2+loads[a3+1]**2+loads[a3+2]**2)/6;
-          if (flags[edge.b] & 2) force += Math.sqrt(loads[b3]**2+loads[b3+1]**2+loads[b3+2]**2)/6;
-          const dy = positions[b3+1] - positions[a3+1];
-          const isTension = dy > 0;
-          const maxS = isTension
-            ? Math.min(properties[a4+1], properties[b4+1]) * 1e6
-            : Math.min(properties[a4], properties[b4]) * 1e6;
-          const sr = maxS > 0 ? force / maxS : 0;
-          if (sr > maxSR) maxSR = sr;
-          if (sr > 0.8) danger++;
-          if (sr > 1.0) overload++;
-          feaEdges.push({
-            nodeA: {x:positions[a3], y:positions[a3+1], z:positions[a3+2]},
-            nodeB: {x:positions[b3], y:positions[b3+1], z:positions[b3+2]},
-            stress: force, stressRatio: sr, isTension,
-          });
-        }
-
-        state.setFEAResult({
-          edges: feaEdges, displacements: new Map(),
-          dangerCount: danger, maxStressRatio: maxSR, totalEdges: feaEdges.length,
+        semanticEngine.applyFEAResults({
+          maxStressRatio: result.maxStressRatio,
+          dangerCount: result.dangerCount,
+          nodeStressRatios,
         });
-        state.addLog('success', 'FEA', `分析完成：${feaEdges.length} 條邊，最大應力比 ${maxSR.toFixed(3)}，${danger} 條危險邊`);
+
+        // 執行規則檢查
+        state.runRuleCheck();
+
+        state.addLog('success', 'FEA',
+          `分析完成：${result.totalEdges} 條邊，最大應力比 ${result.maxStressRatio.toFixed(3)}，${result.dangerCount} 條危險邊`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         state.addLog('error', 'FEA', `分析失敗：${msg}`);
@@ -590,3 +589,19 @@ export const useStore = create<AppState>()(
     },
   }))
 );
+
+// ═══════════════════════════════════════════════════════════════
+//  SemanticEngine 初始化
+// ═══════════════════════════════════════════════════════════════
+
+// 載入預設設計規則
+const defaultRules = getDefaultDesignRules();
+for (const rule of defaultRules) {
+  semanticEngine.addRule(rule);
+}
+
+// 設定圖層名稱映射
+semanticEngine.setLayerNames(defaultLayers);
+
+console.log(`[SemanticEngine] Initialized with ${defaultRules.length} design rules`);
+

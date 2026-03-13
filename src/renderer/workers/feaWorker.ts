@@ -40,6 +40,8 @@ interface FEAEdge {
 }
 
 interface FEAResult {
+  success: boolean;
+  error?: string;
   edges: FEAEdge[];
   maxStressRatio: number;
   dangerCount: number;
@@ -83,6 +85,23 @@ function analyze(input: FEAInput): FEAResult {
     gravityMagnitude
   );
 
+  // 檢查求解是否成功
+  if (!solverResult.success) {
+    return {
+      success: false,
+      error: solverResult.error,
+      edges: [],
+      maxStressRatio: 0,
+      dangerCount: 0,
+      overloadCount: 0,
+      totalForce: 0,
+      safetyLevel: 'safe',
+      solverIterations: 0,
+      residualNorm: 0,
+      elapsedMs: solverResult.elapsedMs,
+    };
+  }
+
   // 轉換為向後相容的 FEAResult 格式
   const edges: FEAEdge[] = solverResult.edges.map(e => ({
     nodeA: e.nodeA,
@@ -110,6 +129,7 @@ function analyze(input: FEAInput): FEAResult {
     solverResult.dangerCount > 0 ? 'warning' : 'safe';
 
   return {
+    success: true,
     edges,
     maxStressRatio: solverResult.maxStressRatio,
     dangerCount: solverResult.dangerCount,

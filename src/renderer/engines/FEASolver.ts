@@ -73,6 +73,10 @@ export interface FEAEdgeResult {
 
 /** FEA 完整結果 */
 export interface FEASolverResult {
+  /** 是否成功求解（false 表示模型無法分析，例如無支撐點） */
+  success: boolean;
+  /** 錯誤訊息（當 success = false 時） */
+  error?: string;
   edges: FEAEdgeResult[];
   displacements: Map<string, Vec3>;  // 節點位移
   dangerCount: number;               // stressRatio > 0.8 的邊數
@@ -472,6 +476,23 @@ export interface FEASolverConfig {
   maxIterations?: number;
   /** CG 求解器收斂容差，預設 1e-8 */
   tolerance: number;
+  /**
+   * 自動支撐開關（預設 true）
+   *
+   * 當 autoSupports = true 且模型沒有任何支撐點時，
+   * 自動固定最低一層節點，避免剛體運動造成 K 矩陣奇異。
+   *
+   * 當 autoSupports = false 且模型沒有任何支撐點時，
+   * 回傳明確的錯誤結果（success = false）。
+   */
+  autoSupports: boolean;
+  /**
+   * Glue 接觸面積因子（預設 0.5）
+   *
+   * Glue joint 的截面面積 = crossSectionArea × glueAreaFactor。
+   * 表示 glue 接觸面積是體素截面的百分比（0.5 = 50%）。
+   */
+  glueAreaFactor: number;
 }
 
 const DEFAULT_CONFIG: FEASolverConfig = {
@@ -480,6 +501,8 @@ const DEFAULT_CONFIG: FEASolverConfig = {
   gravityDirection: { x: 0, y: -1, z: 0 },
   voxelVolume: 1.0,
   tolerance: 1e-8,
+  autoSupports: true,
+  glueAreaFactor: 0.5,
 };
 
 /**
@@ -505,7 +528,7 @@ export function solveFEA(
   // ─── 空模型檢查 ───
   if (voxels.length === 0) {
     return {
-      edges: [], displacements: new Map(), dangerCount: 0,
+      success: true, edges: [], displacements: new Map(), dangerCount: 0,
       maxStressRatio: 0, totalEdges: 0, solverIterations: 0,
       residualNorm: 0, elapsedMs: 0,
     };
@@ -608,7 +631,10 @@ export function solveFEA(
     }
   }
 
-  // b) Glue Joints 桿件
+  // b) Glue Joints 桁件
+  //    Glue joint 的截面面積 = crossSectionArea × glueAreaFactor
+  //    表示 glue 接觸面積是體素截面的百分比
+  const glueArea = cfg.crossSectionArea * cfg.glueAreaFactor;
   for (const gj of glueJoints) {
     const nodeA = nodeMap.get(vecKey(gj.voxelA));
     const nodeB = nodeMap.get(vecKey(gj.voxelB));
@@ -634,15 +660,15 @@ export function solveFEA(
       nodeBIndex: nodeB.index,
       length: L,
       direction,
-      area: cfg.crossSectionArea,
+      area: glueArea,
       youngModulus: E,
     });
   }
 
-  // 無桿件 → 無法分析
+  // 無桁件 → 無法分析
   if (elements.length === 0) {
     return {
-      edges: [], displacements: new Map(), dangerCount: 0,
+      success: true, edges: [], displacements: new Map(), dangerCount: 0,
       maxStressRatio: 0, totalEdges: 0, solverIterations: 0,
       residualNorm: 0, elapsedMs: performance.now() - startTime,
     };
@@ -705,21 +731,34 @@ export function solveFEA(
     }
   }
 
-  // 若無支撐點，自動固定最低層
+  // 若無支撐點，根據 autoSupports 開關決定行為
   if (fixedDOFs.length === 0) {
-    let minY = Infinity;
-    for (const node of nodes) {
-      if (node.pos.y < minY) minY = node.pos.y;
-    }
-    for (const node of nodes) {
-      if (Math.abs(node.pos.y - minY) < 0.01) {
-        fixedDOFs.push(node.index * 3 + 0);
-        fixedDOFs.push(node.index * 3 + 1);
-        fixedDOFs.push(node.index * 3 + 2);
+    if (cfg.autoSupports) {
+      // 自動固定最低一層節點
+      let minY = Infinity;
+      for (const node of nodes) {
+        if (node.pos.y < minY) minY = node.pos.y;
       }
-    }
-    if (fixedDOFs.length > 0) {
-      console.log(`[FEASolver] No supports defined. Auto-fixing ${fixedDOFs.length / 3} nodes at y=${minY}.`);
+      let autoFixedCount = 0;
+      for (const node of nodes) {
+        if (Math.abs(node.pos.y - minY) < 0.01) {
+          fixedDOFs.push(node.index * 3 + 0);
+          fixedDOFs.push(node.index * 3 + 1);
+          fixedDOFs.push(node.index * 3 + 2);
+          autoFixedCount++;
+        }
+      }
+      console.log(`[FEA] Auto-supports enabled: fixing ${autoFixedCount} nodes at y=${minY}`);
+    } else {
+      // autoSupports = false 且無支撐點 → 回傳錯誤
+      console.log('[FEA] Auto-supports disabled: user must define supports');
+      return {
+        success: false,
+        error: 'No supports defined. Enable autoSupports or add fixed nodes.',
+        edges: [], displacements: new Map(), dangerCount: 0,
+        maxStressRatio: 0, totalEdges: 0, solverIterations: 0,
+        residualNorm: 0, elapsedMs: performance.now() - startTime,
+      };
     }
   }
 
@@ -855,6 +894,7 @@ export function solveFEA(
   );
 
   return {
+    success: true,
     edges: feaEdges,
     displacements,
     dangerCount,
