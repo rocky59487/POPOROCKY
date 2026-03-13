@@ -536,7 +536,8 @@ function PipelineResultViz() {
 
     if (result.verbSurfaces && result.verbSurfaces.length > 0) {
       try {
-        const tess = result.verbSurfaces[0].tessellate();
+        const verbSurf = result.verbSurfaces[0] as { tessellate: () => { points: number[][]; faces: number[][] } };
+        const tess = verbSurf.tessellate();
         if (tess && tess.points && tess.faces) {
           const geo = new THREE.BufferGeometry();
           const positions: number[] = [];
