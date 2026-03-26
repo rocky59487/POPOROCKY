@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Play, SkipForward, RotateCcw, Download, CheckCircle, Clock, AlertCircle, Loader, ChevronDown, ChevronRight, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { downloadMinecraft, MINECRAFT_FORMATS, MinecraftFormat } from '../../engines/MinecraftExporter';
+import { nurbsToVoxels } from '../../pipeline/NURBSToVoxel';
 
 interface Props { open: boolean; onClose: () => void; }
 
@@ -11,7 +13,7 @@ const statusIcons: Record<string, React.ReactNode> = {
   error: <AlertCircle size={14} style={{ color: '#ff4757' }} />,
 };
 
-const stageColors = ['#3dd68c', '#638cff', '#a78bfa', '#f472b6'];
+const stageColors = ['#3dd68c', '#638cff', '#a78bfa', '#f472b6', '#f0932b'];
 
 export function PipelineDialog({ open, onClose }: Props) {
   const pipeline = useStore(s => s.pipeline);
@@ -23,6 +25,8 @@ export function PipelineDialog({ open, onClose }: Props) {
   const [mode, setMode] = useState<'all' | 'step'>('all');
   const [expandedStage, setExpandedStage] = useState<number>(0);
   const [exportFormats, setExportFormats] = useState({ obj: true, rhino: false, step: false });
+  const [mcFormat, setMcFormat] = useState<MinecraftFormat>('schem');
+  const [mcExporting, setMcExporting] = useState(false);
 
   if (!open) return null;
 
@@ -142,6 +146,64 @@ export function PipelineDialog({ open, onClose }: Props) {
               </label>
             </div>
           ))}
+        </>
+      ),
+    },
+    {
+      name: 'Minecraft 匯出',
+      desc: '將 NURBS 曲面體素化後匯出為 Minecraft 格式（.schem / .litematic / .schematic）',
+      params: (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>
+            管線：NURBS 曲面 → 表面取樣 → 體素化（含實心填充）→ Minecraft NBT
+          </div>
+          {MINECRAFT_FORMATS.map(fmt => (
+            <div key={fmt.key} className="export-format-item">
+              <label className="checkbox-label">
+                <input type="radio" name="mc-format" checked={mcFormat === fmt.key}
+                  onChange={() => setMcFormat(fmt.key)} />
+                <span className="checkbox-custom" />
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>
+                    {fmt.label}
+                    <span style={{ fontSize: 10, color: 'var(--accent)', marginLeft: 6 }}>{fmt.mcVersion}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{fmt.desc}</div>
+                </div>
+              </label>
+            </div>
+          ))}
+          <button
+            className="btn btn-sm btn-primary"
+            disabled={mcExporting || pipeline.status !== 'done'}
+            onClick={async () => {
+              setMcExporting(true);
+              try {
+                const surfaces = pipeline.result || [];
+                const voxels = useStore.getState().voxels;
+                if (surfaces.length > 0) {
+                  const mcVoxels = nurbsToVoxels(surfaces, { sampleResolution: 64, fillInterior: true });
+                  const name = useStore.getState().projectName || 'export';
+                  await downloadMinecraft(mcVoxels, { format: mcFormat }, `${name}.${mcFormat === 'schem' ? 'schem' : mcFormat}`);
+                  addLog('success', 'Minecraft', `已匯出 ${mcVoxels.length} 個方塊為 .${mcFormat}`);
+                } else if (voxels.length > 0) {
+                  const name = useStore.getState().projectName || 'export';
+                  await downloadMinecraft(voxels, { format: mcFormat }, `${name}.${mcFormat === 'schem' ? 'schem' : mcFormat}`);
+                  addLog('success', 'Minecraft', `已從體素匯出 ${voxels.length} 個方塊為 .${mcFormat}`);
+                } else {
+                  addLog('warning', 'Minecraft', '沒有 NURBS 曲面或體素可匯出');
+                }
+              } catch (e: any) {
+                addLog('error', 'Minecraft', `匯出失敗: ${e.message}`);
+              } finally {
+                setMcExporting(false);
+              }
+            }}
+            style={{ marginTop: 8, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          >
+            <Download size={12} />
+            {mcExporting ? '匯出中...' : '匯出 Minecraft'}
+          </button>
         </>
       ),
     },

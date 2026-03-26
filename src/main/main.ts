@@ -30,6 +30,10 @@ function buildMenu(): void {
       { label: '匯出 .iges', click: () => send('file:export-iges') },
       { label: '匯出 .obj', click: () => send('file:export-obj') },
       { type: 'separator' },
+      { label: '匯出 Minecraft .schem (WorldEdit)', click: () => send('file:export-mc-schem') },
+      { label: '匯出 Minecraft .litematic (Litematica)', click: () => send('file:export-mc-litematic') },
+      { label: '匯出 Minecraft .schematic (Legacy)', click: () => send('file:export-mc-schematic') },
+      { type: 'separator' },
       { label: '結束', accelerator: 'CmdOrCtrl+Q', role: 'quit' },
     ]},
     { label: 'Edit', submenu: [

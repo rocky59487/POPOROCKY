@@ -18,6 +18,7 @@ import { voxelEngine } from './engines/VoxelEngine';
 import { loadEngine, MATERIAL_PRESETS } from './engines/LoadEngine';
 import { projectManager } from './engines/ProjectManager';
 import { OBJExporter } from './engines/OBJExporter';
+import { downloadMinecraft, MinecraftFormat } from './engines/MinecraftExporter';
 import { glueEngine } from './engines/GlueEngine';
 import eventBus from './engines/EventBus';
 import { Layers, Image, BarChart3 } from 'lucide-react';
@@ -72,6 +73,21 @@ export default function App() {
           case 'save-project': projectManager.downloadProject(); break;
           case 'screenshot': projectManager.takeScreenshot(); break;
           case 'export-obj': OBJExporter.downloadOBJ(); break;
+          case 'file:export-mc-schem':
+            downloadMinecraft(voxels, { format: 'schem' }, `${useStore.getState().projectName || 'export'}.schem`)
+              .then(() => addLog('success', 'Export', '已匯出 Minecraft .schem'))
+              .catch(e => addLog('error', 'Export', `匯出失敗: ${e.message}`));
+            break;
+          case 'file:export-mc-litematic':
+            downloadMinecraft(voxels, { format: 'litematic' }, `${useStore.getState().projectName || 'export'}.litematic`)
+              .then(() => addLog('success', 'Export', '已匯出 Minecraft .litematic'))
+              .catch(e => addLog('error', 'Export', `匯出失敗: ${e.message}`));
+            break;
+          case 'file:export-mc-schematic':
+            downloadMinecraft(voxels, { format: 'schematic' }, `${useStore.getState().projectName || 'export'}.schematic`)
+              .then(() => addLog('success', 'Export', '已匯出 Minecraft .schematic'))
+              .catch(e => addLog('error', 'Export', `匯出失敗: ${e.message}`));
+            break;
         }
       });
     }
